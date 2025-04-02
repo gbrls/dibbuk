@@ -2,11 +2,15 @@ mod elf;
 mod gdb;
 mod parser;
 mod tui;
+mod app;
+
 
 #[tokio::main]
 async fn main() {
     let (gdb_command_tx, gdb_command_rx) = tokio::sync::mpsc::unbounded_channel();
     let (gdb_output_tx, _) = tokio::sync::broadcast::channel(16);
+
+    let ctx_ref = std::sync::Arc::new(app::DibbukState::new());
 
     // 1. Initial command sender (fire-and-forget)
     tokio::spawn({
@@ -27,24 +31,36 @@ async fn main() {
     });
 
     // 2. GDB event loop (main processor)
-    let event_loop_task = tokio::spawn(gdb::run_event_loop(gdb_command_rx, gdb_output_tx.clone()));
+    let gdb_handle = tokio::spawn(gdb::run_event_loop(gdb_command_rx, gdb_output_tx.clone()));
+
+    let mut gdb_rx = gdb_output_tx.subscribe();
 
     // 3. Output listener (with proper broadcast subscription)
-    let output_task = tokio::spawn(async move {
-        let mut rx = gdb_output_tx.subscribe();
-        while let Ok(event) = rx.recv().await {
-            println!("{:?}", event);
-        }
-        println!("output rx done");
+    //let gdb_printer_handle = tokio::spawn(async move {
+    //    while let Ok(event) = gdb_rx.recv().await {
+    //        //println!("{:#?}", event.mi);
+    //    }
+    //    println!("output rx done");
+    //});
+
+    let gdb_tx = gdb_command_tx.clone();
+    let gdb_rx = gdb_output_tx.subscribe();
+
+
+
+    //tui::run(ctx_ref.clone(), gdb_tx, gdb_rx).await;
+    let tui_handle = tokio::spawn(async move {
+        tui::run(ctx_ref.clone(), gdb_tx, gdb_rx).await;
     });
 
     // 4. Shutdown handler
     tokio::select! {
-        _ = event_loop_task => {},
-        _ = output_task => {},
-        _ = tokio::signal::ctrl_c() => {
-            println!("Shutting down...");
-            gdb_command_tx.send(gdb::GdbCommand::Quit).unwrap();
-        }
+        _ = tui_handle => {},
+        _ = gdb_handle => {},
+        //_ = gdb_printer_handle => {},
+        //_ = tokio::signal::ctrl_c() => {
+        //    println!("Shutting down...");
+        //    gdb_command_tx.send(gdb::GdbCommand::Quit).unwrap();
+        //}
     }
 }

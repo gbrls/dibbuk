@@ -37,6 +37,7 @@ pub struct GdbIo {
 #[derive(Clone, Debug)]
 pub enum GdbCommand {
     AddBreakpoint(String),
+    Input(String),
     StepInstruction,
     Run,
     GetRegisterNames,
@@ -53,8 +54,8 @@ pub enum OutputKind {
 
 #[derive(Clone, Debug)]
 pub struct GdbOutputEvent {
-    mi: Option<parser::MiRecord>,
-    string: OutputKind,
+    pub mi: Option<parser::MiRecord>,
+    pub string: OutputKind,
 }
 
 /// Spawns a GDB process configured for MI interaction. (Same as before)
@@ -151,8 +152,11 @@ pub async fn run_event_loop(
                         .send(GdbOutputEvent {
                             string: OutputKind::Stdout(line_buf.clone()),
                             mi: match parser::parse_mi_line(&line_buf) {
-                                Err(_) => None,
-                                Ok((s, rec)) => None,
+                                Err(e) => {
+                                    eprintln!("!!! {:?} -> {:?} !!!", &line_buf, e);
+                                    None
+                                }
+                                Ok((s, rec)) => Some(rec),
                             },
                         })
                         .unwrap();
@@ -184,7 +188,7 @@ pub async fn run_event_loop(
                 }
                 Ok(_) => {
                     // Print directly to the user's terminal stderr
-                    eprint!("{}", line_buf);
+                    //eprint!("{}", line_buf);
                     // Flush stderr
                     if let Err(e) = std::io::stderr().flush() {
                         eprintln!("[Proxy Warning] Failed to flush stderr: {}", e);
@@ -202,34 +206,10 @@ pub async fn run_event_loop(
     let mut user_input_reader = BufReader::new(stdin());
     let mut gdb_stdin = gdb_io.stdin; // Take ownership of stdin writer
     let mut child_process = gdb_io.child_process; // Take ownership for waiting later
-    let mut user_line_buf = String::new();
 
     let stdin_handle = tokio::spawn(async move {
         gdb_commands_loop(gdb_stdin, cmd_rx).await;
     });
-
-    loop {
-        user_line_buf.clear();
-        // Read a line from the user running the proxy app
-        match user_input_reader.read_line(&mut user_line_buf).await {
-            Ok(0) => {
-                // User pressed Ctrl+D (EOF)
-                println!("\n[Proxy Info] User input EOF detected. Sending exit command to GDB.");
-                // Try to tell GDB to exit gracefully
-                break; // Exit the input loop
-            }
-            Ok(_) => {
-                let command_to_send = user_line_buf.trim(); // Trim whitespace
-            }
-            Err(e) => {
-                eprintln!(
-                    "\n[Proxy Error] Error reading user input: {}. Exiting proxy.",
-                    e
-                );
-                break; // Exit loop on user input error
-            }
-        }
-    }
 
     // --- Cleanup ---
     println!("[Proxy Info] Input loop exited. Waiting for GDB process to terminate...");
@@ -272,6 +252,7 @@ async fn gdb_commands_loop(mut gdb_stdin: ChildStdin, mut cmd_rx: UnboundedRecei
             GetRegisterNames => "-data-list-register-names".into(),
             GetRegisterValues => "-data-list-register-values x".into(),
             Quit => "exit".into(),
+            Input(s) => s,
             _ => todo!("ops..."),
         };
         cmd_ascii.push('\n');
