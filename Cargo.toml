@@ -1,0 +1,11 @@
+[package]
+name = "dibbuk"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+goblin = "0.9.3"
+thiserror = "2.0.12"
+anyhow = "1.0"
+tokio = { version = "1", features = ["full"] }
+nom = "8.0.0"
