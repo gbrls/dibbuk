@@ -2,20 +2,92 @@
 
 // Make sure types are accessible, e.g., using `pub mod mi_types;` in lib.rs/main.rs
 // and `use super::mi_types::*;` here.
-use super::mi_types::*;
 
+use nom::Parser;
 use nom::{
     branch::alt,
     bytes::complete::{is_not, take_while1}, // Using `complete` version for simplicity now
     character::complete::{char, digit1, multispace0},
     combinator::{map, map_res, opt, recognize, value}, // `value` is useful for fixed returns
-    multi::separated_list0, // For comma-separated results
+    multi::separated_list0,                            // For comma-separated results
     sequence::{delimited, preceded, separated_pair, tuple},
     IResult, // nom's standard result type: Result<(&str, Output), nom::Err>
 };
-use nom::Parser;
 use std::collections::HashMap;
 
+/// Represents a fully parsed GDB MI Record (Output Line).
+#[derive(Debug, Clone, PartialEq)]
+pub enum MiRecord {
+    /// Result record, indicates command completion (`^`).
+    Result(ResultRecord),
+    /// Async record reporting execution state changes (`*`).
+    ExecAsync(AsyncRecord),
+    /// Async record reporting status of slow operations (`+`).
+    StatusAsync(AsyncRecord),
+    /// Async record reporting notifications (`=`).
+    NotifyAsync(AsyncRecord),
+    /// Console stream output (`~`). Text intended for direct display.
+    ConsoleStream(String),
+    /// Target stream output (`@`). Text coming from the target process.
+    TargetStream(String),
+    /// Log stream output (`&`). Text GDB wants to log.
+    LogStream(String),
+    /// The GDB prompt `(gdb)`. Not strictly MI but essential marker.
+    GdbPrompt,
+    /// Represents a line that couldn't be parsed as a known MI record.
+    Unknown(String),
+}
+
+/// Represents the payload of a Result Record (`^`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResultRecord {
+    /// Optional unique token sent with the command.
+    pub token: Option<u64>,
+    /// Result class (e.g., "done", "running", "connected", "error", "exit").
+    pub class: String,
+    /// Key-value pairs associated with the result.
+    pub results: HashMap<String, MiValue>,
+}
+
+/// Represents the payload of an Async Record (`*`, `+`, `=`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct AsyncRecord {
+    /// Optional unique token (often present for status/exec).
+    pub token: Option<u64>,
+    /// The specific kind of async record based on the prefix.
+    pub kind: AsyncKind,
+    /// Async class (e.g., "stopped", "thread-group-added", "running").
+    pub class: String,
+    /// Key-value pairs associated with the async output.
+    pub results: HashMap<String, MiValue>,
+}
+
+/// Distinguishes between different types of Async Records based on prefix.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum AsyncKind {
+    /// Execution state change (`*`).
+    Exec,
+    /// Status update for slow commands (`+`).
+    Status,
+    /// Notification of events (`=`).
+    Notify,
+}
+
+/// Represents the possible value types within MI results (key=value pairs).
+/// Based on GDB MI documentation Value Types.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MiValue {
+    /// A constant string (`"content"`). Content does NOT include quotes and IS unescaped.
+    Const(String),
+    /// A tuple/struct (`{key="val",key=...}`). Content is an ordered map. Using Vec to preserve order.
+    Tuple(Vec<(String, MiValue)>),
+    /// A list (`[val1, val2, ...]`). Content is a vector of values.
+    List(Vec<MiValue>),
+    // Note: GDB MI also mentions C-Strings, but they seem to use the same format
+    // as Const ("..."). We primarily parse Const and handle escapes within it.
+    // Named lists (like `results=[key=val,...]`) are handled by parsing the outer
+    // key ("results") and then its MiValue::List content.
+}
 
 // --- Main Entry Point ---
 
@@ -38,11 +110,12 @@ pub fn parse_mi_line(input: &str) -> IResult<&str, MiRecord> {
         map(parse_target_stream, MiRecord::TargetStream),
         map(parse_log_stream, MiRecord::LogStream),
         // Fallback: If none match, consider it unknown
-        map(recognize(nom::character::complete::anychar), |s: &str| MiRecord::Unknown(s.to_string()))
-    //))(input)
-    )).parse(input)
+        map(recognize(nom::character::complete::anychar), |s: &str| {
+            MiRecord::Unknown(s.to_string())
+        }), //))(input)
+    ))
+    .parse(input)
 }
-
 
 // --- Record Type Parsers ---
 
@@ -51,7 +124,14 @@ fn parse_result_record(input: &str) -> IResult<&str, ResultRecord> {
     let (i, token) = preceded(char('^'), parse_optional_token).parse(input)?;
     let (i, class) = parse_identifier(i)?;
     let (i, results) = parse_optional_results_list(i)?; // Use the results parser
-    Ok((i, ResultRecord { token, class, results }))
+    Ok((
+        i,
+        ResultRecord {
+            token,
+            class,
+            results,
+        },
+    ))
 }
 
 // Exec Async: *token? class ( "," result )*
@@ -59,15 +139,31 @@ fn parse_exec_async_record(input: &str) -> IResult<&str, AsyncRecord> {
     let (i, token) = preceded(char('*'), parse_optional_token).parse(input)?;
     let (i, class) = parse_identifier(i)?;
     let (i, results) = parse_optional_results_list(i)?;
-    Ok((i, AsyncRecord { token, kind: AsyncKind::Exec, class, results }))
+    Ok((
+        i,
+        AsyncRecord {
+            token,
+            kind: AsyncKind::Exec,
+            class,
+            results,
+        },
+    ))
 }
 
 // Status Async: +token? class ( "," result )*
 fn parse_status_async_record(input: &str) -> IResult<&str, AsyncRecord> {
-     let (i, token) = preceded(char('+'), parse_optional_token).parse(input)?;
+    let (i, token) = preceded(char('+'), parse_optional_token).parse(input)?;
     let (i, class) = parse_identifier(i)?;
     let (i, results) = parse_optional_results_list(i)?;
-    Ok((i, AsyncRecord { token, kind: AsyncKind::Status, class, results }))
+    Ok((
+        i,
+        AsyncRecord {
+            token,
+            kind: AsyncKind::Status,
+            class,
+            results,
+        },
+    ))
 }
 
 // Notify Async: =token? class ( "," result )*
@@ -75,9 +171,16 @@ fn parse_notify_async_record(input: &str) -> IResult<&str, AsyncRecord> {
     let (i, token) = preceded(char('='), parse_optional_token).parse(input)?;
     let (i, class) = parse_identifier(i)?;
     let (i, results) = parse_optional_results_list(i)?;
-    Ok((i, AsyncRecord { token, kind: AsyncKind::Notify, class, results }))
+    Ok((
+        i,
+        AsyncRecord {
+            token,
+            kind: AsyncKind::Notify,
+            class,
+            results,
+        },
+    ))
 }
-
 
 // --- Stream Parsers ---
 
@@ -94,7 +197,6 @@ fn parse_log_stream(input: &str) -> IResult<&str, String> {
     preceded(char('&'), parse_mi_string_value).parse(input)
 }
 
-
 // --- Core Component Parsers ---
 
 /// Parses the optional leading token (digits).
@@ -107,7 +209,8 @@ fn parse_identifier(input: &str) -> IResult<&str, String> {
     map(
         take_while1(|c: char| c.is_alphanumeric() || c == '-' || c == '_'),
         |s: &str| s.to_string(),
-    ).parse(input)
+    )
+    .parse(input)
 }
 
 /// Parses the optional comma-separated list of results following a class identifier.
@@ -117,8 +220,9 @@ fn parse_optional_results_list(input: &str) -> IResult<&str, HashMap<String, MiV
     let (i, maybe_results) = opt(preceded(
         char(','),
         // Use separated_list0 for zero or more key=value pairs separated by commas
-        separated_list0(char(','), parse_key_value_pair)
-    )).parse(input)?;
+        separated_list0(char(','), parse_key_value_pair),
+    ))
+    .parse(input)?;
 
     // Convert the Vec<(String, MiValue)> from separated_list0 into a HashMap
     let results_map = match maybe_results {
@@ -134,10 +238,10 @@ fn parse_key_value_pair(input: &str) -> IResult<&str, (String, MiValue)> {
     separated_pair(
         parse_identifier, // The key
         char('='),
-        parse_value        // The value (recursive)
-    ).parse(input)
+        parse_value, // The value (recursive)
+    )
+    .parse(input)
 }
-
 
 // --- Value Parsers (STUBS - Needs detailed implementation!) ---
 
@@ -146,11 +250,11 @@ fn parse_key_value_pair(input: &str) -> IResult<&str, (String, MiValue)> {
 fn parse_value(input: &str) -> IResult<&str, MiValue> {
     alt((
         map(parse_mi_string_value, MiValue::Const), // Handles "..."
-        map(parse_tuple, MiValue::Tuple),         // Handles {...}
-        map(parse_list, MiValue::List),           // Handles [...]
-    )).parse(input)
+        map(parse_tuple, MiValue::Tuple),           // Handles {...}
+        map(parse_list, MiValue::List),             // Handles [...]
+    ))
+    .parse(input)
 }
-
 
 /// Parses an MI String Constant: "..."
 /// This needs to handle C-style escapes properly (\", \\, \n, \t, \ooo).
@@ -161,8 +265,9 @@ fn parse_mi_string_value(input: &str) -> IResult<&str, String> {
         char('"'),
         // This recognizes content *between* quotes but doesn't process escapes
         recognize(is_not("\"")), // Simpler version for now
-        char('"')
-    ).parse(input)?;
+        char('"'),
+    )
+    .parse(input)?;
     // TODO: Add actual unescaping logic here based on raw_content
     Ok((i, raw_content.to_string())) // Returning raw content temporarily
 }
@@ -173,20 +278,21 @@ fn parse_tuple(input: &str) -> IResult<&str, Vec<(String, MiValue)>> {
     delimited(
         char('{'),
         separated_list0(char(','), parse_key_value_pair),
-        char('}')
-    ).parse(input)
+        char('}'),
+    )
+    .parse(input)
 }
 
 /// Parses an MI List: [ value, value, ... ]
 fn parse_list(input: &str) -> IResult<&str, Vec<MiValue>> {
     // Lists are values separated by commas inside square brackets
-     delimited(
+    delimited(
         char('['),
         separated_list0(char(','), parse_value), // Recursive call to parse_value
-        char(']')
-    ).parse(input)
+        char(']'),
+    )
+    .parse(input)
 }
-
 
 // --- Parser Tests (Place within the module or in tests/) ---
 #[cfg(test)]
@@ -196,8 +302,14 @@ mod tests {
 
     #[test]
     fn test_parse_prompt() {
-        assert_eq!(parse_mi_line("(gdb)").finish().unwrap().1, MiRecord::GdbPrompt);
-        assert_eq!(parse_mi_line("  (gdb)  ").finish().unwrap().1, MiRecord::GdbPrompt);
+        assert_eq!(
+            parse_mi_line("(gdb)").finish().unwrap().1,
+            MiRecord::GdbPrompt
+        );
+        assert_eq!(
+            parse_mi_line("  (gdb)  ").finish().unwrap().1,
+            MiRecord::GdbPrompt
+        );
     }
 
     #[test]
@@ -212,7 +324,7 @@ mod tests {
 
     #[test]
     fn test_parse_done_with_token() {
-         let expected = MiRecord::Result(ResultRecord {
+        let expected = MiRecord::Result(ResultRecord {
             token: Some(123),
             class: "done".to_string(),
             results: HashMap::new(),
@@ -220,18 +332,21 @@ mod tests {
         assert_eq!(parse_mi_line("123^done").finish().unwrap().1, expected);
     }
 
-     #[test]
+    #[test]
     fn test_parse_console_stream_basic() {
         // WARNING: Relies on placeholder string parsing - ignores escapes!
-         let expected = MiRecord::ConsoleStream("hello world".to_string());
-         assert_eq!(parse_mi_line("~\"hello world\"").finish().unwrap().1, expected);
+        let expected = MiRecord::ConsoleStream("hello world".to_string());
+        assert_eq!(
+            parse_mi_line("~\"hello world\"").finish().unwrap().1,
+            expected
+        );
     }
 
     // TODO: Add tests for other stream types (@, &)
 
     #[test]
     fn test_parse_exec_async_basic() {
-         let expected = MiRecord::ExecAsync(AsyncRecord {
+        let expected = MiRecord::ExecAsync(AsyncRecord {
             token: None,
             kind: AsyncKind::Exec,
             class: "running".to_string(),
@@ -240,9 +355,9 @@ mod tests {
         assert_eq!(parse_mi_line("*running").finish().unwrap().1, expected);
     }
 
-     #[test]
+    #[test]
     fn test_parse_status_async_basic() {
-         let expected = MiRecord::StatusAsync(AsyncRecord {
+        let expected = MiRecord::StatusAsync(AsyncRecord {
             token: Some(45),
             kind: AsyncKind::Status,
             class: "download".to_string(),
@@ -251,7 +366,7 @@ mod tests {
         assert_eq!(parse_mi_line("45+download").finish().unwrap().1, expected);
     }
 
-     #[test]
+    #[test]
     fn test_parse_notify_async_basic() {
         let expected = MiRecord::NotifyAsync(AsyncRecord {
             token: None,
@@ -301,4 +416,3 @@ mod tests {
 
     // TODO: Add tests for tuples {}, lists [], nested values, and escaped strings.
 }
-

@@ -1,8 +1,11 @@
 // src/main.rs (or relevant module)
 
+use crate::parser;
 use std::io::Write; // For flushing standard streams
 use std::process::Stdio;
 use thiserror::Error;
+use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::{
     io::{stdin, AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::{Child, ChildStderr, ChildStdin, ChildStdout, Command},
@@ -28,7 +31,30 @@ pub struct GdbIo {
     pub stdin: ChildStdin,
     pub stdout_reader: BufReader<ChildStdout>,
     pub stderr_reader: BufReader<ChildStderr>,
-    child_process: Child,
+    pub child_process: Child,
+}
+
+#[derive(Clone, Debug)]
+pub enum GdbCommand {
+    AddBreakpoint(String),
+    StepInstruction,
+    Run,
+    GetRegisterNames,
+    GetRegisterValues,
+    GetRegisterUpdates,
+    Quit,
+}
+
+#[derive(Clone, Debug)]
+pub enum OutputKind {
+    Stdout(String),
+    StdErr(String),
+}
+
+#[derive(Clone, Debug)]
+pub struct GdbOutputEvent {
+    mi: Option<parser::MiRecord>,
+    string: OutputKind,
 }
 
 /// Spawns a GDB process configured for MI interaction. (Same as before)
@@ -76,7 +102,10 @@ pub async fn spawn_gdb_process(gdb_path: &str) -> Result<GdbIo, GdbProcessError>
     })
 }
 
-pub async fn start() {
+pub async fn run_event_loop(
+    cmd_rx: UnboundedReceiver<GdbCommand>,
+    stdout_tx: tokio::sync::broadcast::Sender<GdbOutputEvent>,
+) {
     println!("[Proxy Setup] Attempting to spawn GDB...");
     let gdb_io_result = spawn_gdb_process("gdb").await;
 
@@ -116,8 +145,17 @@ pub async fn start() {
                 }
                 Ok(_) => {
                     // Print directly to the user's terminal stdout
-                    println!("{}", line_buf);
-                    println!("{:?}", crate::parser::parse_mi_line(&line_buf));
+                    //println!("{}", line_buf);
+                    //println!("{:?}", crate::parser::parse_mi_line(&line_buf));
+                    stdout_tx
+                        .send(GdbOutputEvent {
+                            string: OutputKind::Stdout(line_buf.clone()),
+                            mi: match parser::parse_mi_line(&line_buf) {
+                                Err(_) => None,
+                                Ok((s, rec)) => None,
+                            },
+                        })
+                        .unwrap();
                     // Flush stdio to ensure the output is immediately visible
                     if let Err(e) = std::io::stdout().flush() {
                         eprintln!("[Proxy Warning] Failed to flush stdout: {}", e);
@@ -166,25 +204,9 @@ pub async fn start() {
     let mut child_process = gdb_io.child_process; // Take ownership for waiting later
     let mut user_line_buf = String::new();
 
-    use std::time::Duration;
-    use tokio::time::sleep;
-
-    sleep(Duration::from_millis(300)).await;
-
-    let start_cmds = vec![
-        "-break-insert main\n",
-        "-exec-run\n",
-        "-data-list-register-names\n",
-        "-data-list-register-values x\n",
-    ];
-
-    for cmd in start_cmds {
-        println!("(~) sending {}", cmd);
-        gdb_stdin
-            .write_all(cmd.as_bytes())
-            .await
-            .and_then(|_| Ok(gdb_stdin.flush()));
-    }
+    let stdin_handle = tokio::spawn(async move {
+        gdb_commands_loop(gdb_stdin, cmd_rx).await;
+    });
 
     loop {
         user_line_buf.clear();
@@ -194,63 +216,10 @@ pub async fn start() {
                 // User pressed Ctrl+D (EOF)
                 println!("\n[Proxy Info] User input EOF detected. Sending exit command to GDB.");
                 // Try to tell GDB to exit gracefully
-                let exit_cmd = "-gdb-exit\n";
-                if let Err(e) = gdb_stdin
-                    .write_all(exit_cmd.as_bytes())
-                    .await
-                    .and_then(|_| Ok(gdb_stdin.flush()))
-                {
-                    eprintln!(
-                        "[Proxy Warning] Failed to send GDB exit command on user EOF: {}",
-                        e
-                    );
-                }
                 break; // Exit the input loop
             }
             Ok(_) => {
                 let command_to_send = user_line_buf.trim(); // Trim whitespace
-
-                if command_to_send == ":quit" {
-                    println!(
-                        "\n[Proxy Info] ':quit' command received. Sending exit command to GDB."
-                    );
-                    // Tell GDB to exit gracefully
-                    let exit_cmd = "-gdb-exit\n";
-                    if let Err(e) = gdb_stdin
-                        .write_all(exit_cmd.as_bytes())
-                        .await
-                        .and_then(|_| Ok(gdb_stdin.flush()))
-                    {
-                        eprintln!("[Proxy Warning] Failed to send GDB exit command: {}", e);
-                    }
-                    break; // Exit the input loop
-                } else if !command_to_send.is_empty() {
-                    // Add newline, as GDB expects newline-terminated commands
-                    let full_command = format!("{}\n", command_to_send);
-
-                    // Forward the command to GDB's stdin
-                    match gdb_stdin.write_all(full_command.as_bytes()).await {
-                        Ok(_) => {
-                            // Try to flush to ensure it's sent immediately
-                            if let Err(e) = gdb_stdin.flush().await {
-                                eprintln!("\n[Proxy Error] Failed to flush GDB stdin: {}", e);
-                                // Potentially break if flushing fails, as commands might not reach GDB
-                                break;
-                            }
-                            // Optional: Log that the command was sent
-                            // println!("[Proxy Debug] Sent: {}", command_to_send);
-                        }
-                        Err(e) => {
-                            eprintln!(
-                                "\n[Proxy Error] Failed to write to GDB stdin: {}. Exiting proxy.",
-                                e
-                            );
-                            // If we can't write to GDB, the proxy is broken
-                            break;
-                        }
-                    }
-                }
-                // If the line was empty or just whitespace, do nothing and read again
             }
             Err(e) => {
                 eprintln!(
@@ -277,7 +246,8 @@ pub async fn start() {
     // Wait for the stdout/stderr forwarding tasks to complete.
     // They should complete naturally when GDB closes its output streams upon exiting.
     println!("[Proxy Info] Waiting for I/O tasks to finish...");
-    let (stdout_res, stderr_res) = tokio::join!(stdout_handle, stderr_handle);
+    let (stdout_res, stderr_res, stdin_res) =
+        tokio::join!(stdout_handle, stderr_handle, stdin_handle);
 
     if let Err(e) = stdout_res {
         eprintln!("[Proxy Warning] Stdout task panicked or failed: {}", e);
@@ -286,9 +256,28 @@ pub async fn start() {
         eprintln!("[Proxy Warning] Stderr task panicked or failed: {}", e);
     }
 
+    if let Err(e) = stdin_res {
+        eprintln!("[Proxy Warning] Stdin task panicked or failed: {}", e);
+    }
+
     println!("--- GDB MI Proxy End ---");
 }
 
-
-
-
+async fn gdb_commands_loop(mut gdb_stdin: ChildStdin, mut cmd_rx: UnboundedReceiver<GdbCommand>) {
+    while let Some(cmd) = cmd_rx.recv().await {
+        use GdbCommand::*;
+        let mut cmd_ascii = match cmd {
+            AddBreakpoint(loc) => format!("-break-insert {}", loc),
+            Run => "-exec-run".into(),
+            GetRegisterNames => "-data-list-register-names".into(),
+            GetRegisterValues => "-data-list-register-values x".into(),
+            Quit => "exit".into(),
+            _ => todo!("ops..."),
+        };
+        cmd_ascii.push('\n');
+        gdb_stdin
+            .write_all(cmd_ascii.as_bytes())
+            .await
+            .and_then(|_| Ok(gdb_stdin.flush()));
+    }
+}
