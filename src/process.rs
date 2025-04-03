@@ -40,7 +40,8 @@ pub enum StdinCommand {
     StepInstruction,
     Run,
     GetRegisterNames,
-    GetRegisterValues,
+    GetAllRegisterValues,
+    GetRegisterValues(Vec<usize>),
     GetRegisterUpdates,
     Quit,
 }
@@ -249,7 +250,15 @@ async fn gdb_commands_loop(mut gdb_stdin: ChildStdin, mut cmd_rx: UnboundedRecei
             AddBreakpoint(loc) => format!("-break-insert {}", loc),
             Run => "-exec-run".into(),
             GetRegisterNames => "-data-list-register-names".into(),
-            GetRegisterValues => "-data-list-register-values x".into(),
+            GetAllRegisterValues => "-data-list-register-values x".into(),
+            GetRegisterValues(ids) => {
+                let mut base = "-data-list-register-values x".to_string();
+                for id in ids {
+                    base.push_str(&format!(" {}", id))
+                }
+                base
+            }
+            GetRegisterUpdates => "-data-list-changed-registers".into(),
             Quit => "exit".into(),
             Input(s) => s,
             _ => todo!("ops..."),

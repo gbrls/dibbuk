@@ -1,4 +1,5 @@
 mod elf;
+mod manager;
 mod mi2command;
 mod parser;
 mod process;
@@ -102,7 +103,6 @@ async fn main() {
                 process::StdinCommand::AddBreakpoint("main".into()),
                 process::StdinCommand::Run,
                 process::StdinCommand::GetRegisterNames,
-                process::StdinCommand::GetRegisterValues,
             ];
 
             for cmd in start_cmds {
@@ -114,11 +114,13 @@ async fn main() {
     let gdb_handle = tokio::spawn(process::run_event_loop(gdb_stdin_rx, app.gdb_mi_tx.clone()));
     let app_handle = tokio::spawn(mi2command::run(app.data_handle()));
     let tui_handle = tokio::spawn(tui::run(app.data_handle()));
+    let mgr_handle = tokio::spawn(manager::run(app.data_handle()));
 
     // 4. Shutdown handler
     tokio::select! {
         _ = tui_handle => {},
         _ = gdb_handle => {},
         _ = app_handle => {},
+        _ = mgr_handle => {},
     }
 }

@@ -319,7 +319,11 @@ impl App {
         let help_message = Paragraph::new(text);
         frame.render_widget(help_message, help_area);
 
-        let state_message = Paragraph::new(format!("{:#?}", app_state)).scroll((525, 0));
+        //let state_message = Paragraph::new(format!("{:#?}", app_state)).scroll((525, 0));
+        let state_message = Paragraph::new(format!(
+            "rip -> {:#x}",
+            app_state.gdb_ctx.register_value.get("rip").unwrap_or(&0)
+        ));
         frame.render_widget(state_message, state_area);
 
         let input = Paragraph::new(self.input.as_str())
