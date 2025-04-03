@@ -1,16 +1,15 @@
+mod app;
 mod elf;
 mod gdb;
 mod parser;
 mod tui;
-mod app;
-
 
 #[tokio::main]
 async fn main() {
     let (gdb_command_tx, gdb_command_rx) = tokio::sync::mpsc::unbounded_channel();
     let (gdb_output_tx, _) = tokio::sync::broadcast::channel(16);
 
-    let ctx_ref = std::sync::Arc::new(app::DibbukState::new());
+    let ctx_ref = std::sync::Arc::new(tokio::sync::RwLock::new(app::DibbukState::new()));
 
     // 1. Initial command sender (fire-and-forget)
     tokio::spawn({
@@ -34,6 +33,9 @@ async fn main() {
     let gdb_handle = tokio::spawn(gdb::run_event_loop(gdb_command_rx, gdb_output_tx.clone()));
 
     let mut gdb_rx = gdb_output_tx.subscribe();
+    let gdb_tx = gdb_command_tx.clone();
+
+    let app_handle = tokio::spawn(app::DibbukState::run(ctx_ref.clone(), gdb_rx, gdb_tx));
 
     // 3. Output listener (with proper broadcast subscription)
     //let gdb_printer_handle = tokio::spawn(async move {
@@ -45,8 +47,6 @@ async fn main() {
 
     let gdb_tx = gdb_command_tx.clone();
     let gdb_rx = gdb_output_tx.subscribe();
-
-
 
     //tui::run(ctx_ref.clone(), gdb_tx, gdb_rx).await;
     let tui_handle = tokio::spawn(async move {

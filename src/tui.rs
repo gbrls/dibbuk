@@ -27,9 +27,9 @@ enum AppReturn {
 }
 
 pub async fn run(
-    ctx: Arc<app::DibbukState>,
+    ctx: Arc<tokio::sync::RwLock<app::DibbukState>>,
     gdb_tx: mpsc::UnboundedSender<gdb::GdbCommand>,
-    gdb_rx: broadcast::Receiver<gdb::GdbOutputEvent>,
+    gdb_rx: broadcast::Receiver<gdb::OutputEvent>,
 ) {
     let backend = ratatui::backend::CrosstermBackend::new(std::io::stdout());
     let mut terminal = ratatui::Terminal::new(backend).unwrap();
@@ -50,11 +50,11 @@ pub async fn run(
 /// Application state
 pub struct App {
     /// Shared application context/state (if needed)
-    _ctx: Arc<app::DibbukState>, // Renamed to avoid confusion with Frame context
+    _ctx: Arc<tokio::sync::RwLock<app::DibbukState>>, // Renamed to avoid confusion with Frame context
     /// Channel sender to send commands to GDB
     gdb_tx: mpsc::UnboundedSender<gdb::GdbCommand>,
     /// Channel receiver for GDB output events (needs to be mutable for recv)
-    gdb_rx: broadcast::Receiver<gdb::GdbOutputEvent>,
+    gdb_rx: broadcast::Receiver<gdb::OutputEvent>,
 
     /// Input history
     inputs: Vec<String>,
@@ -76,9 +76,9 @@ enum InputMode {
 
 impl App {
     pub fn new(
-        ctx: Arc<app::DibbukState>,
+        ctx: Arc<tokio::sync::RwLock<app::DibbukState>>,
         gdb_tx: mpsc::UnboundedSender<gdb::GdbCommand>,
-        gdb_rx: broadcast::Receiver<gdb::GdbOutputEvent>,
+        gdb_rx: broadcast::Receiver<gdb::OutputEvent>,
     ) -> Self {
         Self {
             input: String::new(),
@@ -121,7 +121,8 @@ impl App {
                     }
                 },
               _ = tick => {
-                    terminal.draw(|frame| self.draw(frame))?;
+                    let r = self._ctx.read().await;
+                    terminal.draw(|frame| self.draw(frame, r))?;
               },
 
                 // Handle GDB output events
@@ -194,14 +195,16 @@ impl App {
     }
 
     /// Handles events received from the GDB process.
-    fn handle_gdb_event(&mut self, event: gdb::GdbOutputEvent) {
+    fn handle_gdb_event(&mut self, event: gdb::OutputEvent) {
         let message = match event {
-            gdb::GdbOutputEvent {
+            gdb::OutputEvent {
                 mi: Some(crate::parser::MiRecord::ConsoleStream(s)),
                 ..
             } => s,
-            gdb::GdbOutputEvent { mi: Some(mi), .. } => format!("[mi] {:?}", mi),
-            gdb::GdbOutputEvent { mi: None, string } => format!("[raw] {:?}", string),
+
+            gdb::OutputEvent { mi: Some(crate::parser::MiRecord::Unknown(s)), .. } => format!("{}", s),
+            gdb::OutputEvent { mi: Some(mi), .. } => format!("[mi] {:?}", mi),
+            gdb::OutputEvent { mi: None, string } => format!("[raw] {:?}", string),
         };
         self.messages.push(message);
         // Optionally, update other state based on the GDB event (e.g., status bar)
@@ -287,7 +290,7 @@ impl App {
 
     // --- Rendering Logic ---
 
-    fn draw(&self, frame: &mut Frame) {
+    fn draw(&self, frame: &mut Frame, state: tokio::sync::RwLockReadGuard<app::DibbukState>) {
         let vertical = Layout::vertical([
             Constraint::Length(1),
             Constraint::Length(3),
@@ -295,9 +298,14 @@ impl App {
         ]);
         let [help_area, input_area, messages_area] = vertical.areas(frame.area());
 
+        let [messages_area, state_area] = Layout::horizontal([Constraint::Percentage(70), Constraint::Min(1)]).areas(messages_area);
+
+
+
         let (msg, style) = match self.input_mode {
             InputMode::Normal => (
                 vec![
+                    format!("{:?}", state.gdb_ctx.state).into(),
                     "Press ".into(),
                     "q".bold(),
                     " to exit, ".into(),
@@ -308,6 +316,7 @@ impl App {
             ),
             InputMode::Editing => (
                 vec![
+                    format!("{:?}", state.gdb_ctx.state).into(),
                     "Press ".into(),
                     "Esc".bold(),
                     " to stop editing, ".into(),
@@ -320,6 +329,9 @@ impl App {
         let text = Text::from(Line::from(msg)).patch_style(style);
         let help_message = Paragraph::new(text);
         frame.render_widget(help_message, help_area);
+
+        let state_message = Paragraph::new(format!("{:#?}", state));
+        frame.render_widget(state_message, state_area);
 
         let input = Paragraph::new(self.input.as_str())
             .style(match self.input_mode {
@@ -485,3 +497,4 @@ impl App {
 //    }
 //}
 //
+

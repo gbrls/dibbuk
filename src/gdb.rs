@@ -53,7 +53,7 @@ pub enum OutputKind {
 }
 
 #[derive(Clone, Debug)]
-pub struct GdbOutputEvent {
+pub struct OutputEvent {
     pub mi: Option<parser::MiRecord>,
     pub string: OutputKind,
 }
@@ -105,7 +105,7 @@ pub async fn spawn_gdb_process(gdb_path: &str) -> Result<GdbIo, GdbProcessError>
 
 pub async fn run_event_loop(
     cmd_rx: UnboundedReceiver<GdbCommand>,
-    stdout_tx: tokio::sync::broadcast::Sender<GdbOutputEvent>,
+    stdout_tx: tokio::sync::broadcast::Sender<OutputEvent>,
 ) {
     println!("[Proxy Setup] Attempting to spawn GDB...");
     let gdb_io_result = spawn_gdb_process("gdb").await;
@@ -149,7 +149,7 @@ pub async fn run_event_loop(
                     //println!("{}", line_buf);
                     //println!("{:?}", crate::parser::parse_mi_line(&line_buf));
                     stdout_tx
-                        .send(GdbOutputEvent {
+                        .send(OutputEvent {
                             string: OutputKind::Stdout(line_buf.clone()),
                             mi: match parser::parse_mi_line(&line_buf) {
                                 Err(e) => {
