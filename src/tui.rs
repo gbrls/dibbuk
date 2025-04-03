@@ -2,7 +2,7 @@
 
 use futures_util::FutureExt;
 
-use crate::{app, gdb};
+use crate::{mi2command, process};
 use color_eyre::Result;
 use crossterm;
 use crossterm::event::{self, Event as CrosstermEvent, KeyCode, KeyEvent, KeyEventKind};
@@ -26,14 +26,10 @@ enum AppReturn {
     Exit,
 }
 
-pub async fn run(
-    ctx: Arc<tokio::sync::RwLock<app::DibbukState>>,
-    gdb_tx: mpsc::UnboundedSender<gdb::GdbCommand>,
-    gdb_rx: broadcast::Receiver<gdb::OutputEvent>,
-) {
+pub async fn run(app_data: crate::AppDataHandle) {
     let backend = ratatui::backend::CrosstermBackend::new(std::io::stdout());
     let mut terminal = ratatui::Terminal::new(backend).unwrap();
-    let mut app = App::new(ctx, gdb_tx, gdb_rx);
+    let mut app = App::new(app_data);
 
     crossterm::terminal::enable_raw_mode().unwrap();
     crossterm::execute!(
@@ -49,13 +45,6 @@ pub async fn run(
 
 /// Application state
 pub struct App {
-    /// Shared application context/state (if needed)
-    _ctx: Arc<tokio::sync::RwLock<app::DibbukState>>, // Renamed to avoid confusion with Frame context
-    /// Channel sender to send commands to GDB
-    gdb_tx: mpsc::UnboundedSender<gdb::GdbCommand>,
-    /// Channel receiver for GDB output events (needs to be mutable for recv)
-    gdb_rx: broadcast::Receiver<gdb::OutputEvent>,
-
     /// Input history
     inputs: Vec<String>,
     /// Current value of the input box
@@ -66,6 +55,8 @@ pub struct App {
     input_mode: InputMode,
     /// History of commands sent and GDB output received
     messages: Vec<String>, // Combine GDB output and commands here for simplicity
+    //
+    app_data: crate::AppDataHandle,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,23 +66,14 @@ enum InputMode {
 }
 
 impl App {
-    pub fn new(
-        ctx: Arc<tokio::sync::RwLock<app::DibbukState>>,
-        gdb_tx: mpsc::UnboundedSender<gdb::GdbCommand>,
-        gdb_rx: broadcast::Receiver<gdb::OutputEvent>,
-    ) -> Self {
+    pub fn new(app_data: crate::AppDataHandle) -> Self {
         Self {
             input: String::new(),
             input_mode: InputMode::Normal,
             messages: Vec::new(),
             inputs: Vec::new(),
             character_index: 0,
-            _ctx: ctx,
-            gdb_tx,
-            // Note: broadcast::Receiver needs to be mutable to call recv,
-            // or use .resubscribe() if multiple tasks need to listen.
-            // Here we consume the original receiver.
-            gdb_rx,
+            app_data,
         }
     }
 
@@ -121,12 +103,12 @@ impl App {
                     }
                 },
               _ = tick => {
-                    let r = self._ctx.read().await;
+                    let r = self.app_data.state.read().await;
                     terminal.draw(|frame| self.draw(frame, r))?;
               },
 
                 // Handle GDB output events
-                result = self.gdb_rx.recv().fuse() => {
+                result = self.app_data.channels.gdb_mi_rx.recv().fuse() => {
                     match result {
                         Ok(gdb_event) => {
                             // Handle the GDB output event
@@ -195,16 +177,19 @@ impl App {
     }
 
     /// Handles events received from the GDB process.
-    fn handle_gdb_event(&mut self, event: gdb::OutputEvent) {
+    fn handle_gdb_event(&mut self, event: process::MiOutput) {
         let message = match event {
-            gdb::OutputEvent {
+            process::MiOutput {
                 mi: Some(crate::parser::MiRecord::ConsoleStream(s)),
                 ..
             } => s,
 
-            gdb::OutputEvent { mi: Some(crate::parser::MiRecord::Unknown(s)), .. } => format!("{}", s),
-            gdb::OutputEvent { mi: Some(mi), .. } => format!("[mi] {:?}", mi),
-            gdb::OutputEvent { mi: None, string } => format!("[raw] {:?}", string),
+            process::MiOutput {
+                mi: Some(crate::parser::MiRecord::Unknown(s)),
+                ..
+            } => format!("{}", s),
+            process::MiOutput { mi: Some(mi), .. } => format!("[mi] {:?}", mi),
+            process::MiOutput { mi: None, string } => format!("[raw] {:?}", string),
         };
         self.messages.push(message);
         // Optionally, update other state based on the GDB event (e.g., status bar)
@@ -263,8 +248,8 @@ impl App {
             self.messages.push(format!("> {}", command_text));
 
             // Send the command to the GDB handler task
-            let cmd = gdb::GdbCommand::Input(command_text.to_string());
-            if let Err(e) = self.gdb_tx.send(cmd) {
+            let cmd = process::StdinCommand::Input(command_text.to_string());
+            if let Err(e) = self.app_data.channels.gdb_stdin_tx.send(cmd) {
                 // Handle error sending command (e.g., GDB task died)
                 self.messages.push(format!("[Error sending to GDB: {}]", e));
             }
@@ -275,8 +260,8 @@ impl App {
             self.messages.push(format!("> {}", command_text));
 
             // Send the command to the GDB handler task
-            let cmd = gdb::GdbCommand::Input(command_text.to_string());
-            if let Err(e) = self.gdb_tx.send(cmd) {
+            let cmd = process::StdinCommand::Input(command_text.to_string());
+            if let Err(e) = self.app_data.channels.gdb_stdin_tx.send(cmd) {
                 // Handle error sending command (e.g., GDB task died)
                 self.messages.push(format!("[Error sending to GDB: {}]", e));
             }
@@ -290,7 +275,7 @@ impl App {
 
     // --- Rendering Logic ---
 
-    fn draw(&self, frame: &mut Frame, state: tokio::sync::RwLockReadGuard<app::DibbukState>) {
+    fn draw(&self, frame: &mut Frame, app_state: tokio::sync::RwLockReadGuard<crate::AppState>) {
         let vertical = Layout::vertical([
             Constraint::Length(1),
             Constraint::Length(3),
@@ -298,14 +283,14 @@ impl App {
         ]);
         let [help_area, input_area, messages_area] = vertical.areas(frame.area());
 
-        let [messages_area, state_area] = Layout::horizontal([Constraint::Percentage(70), Constraint::Min(1)]).areas(messages_area);
-
-
+        let [messages_area, state_area] =
+            Layout::horizontal([Constraint::Percentage(70), Constraint::Min(1)])
+                .areas(messages_area);
 
         let (msg, style) = match self.input_mode {
             InputMode::Normal => (
                 vec![
-                    format!("{:?}", state.gdb_ctx.state).into(),
+                    format!("{:?} - ", app_state.gdb_ctx.state).into(),
                     "Press ".into(),
                     "q".bold(),
                     " to exit, ".into(),
@@ -316,7 +301,7 @@ impl App {
             ),
             InputMode::Editing => (
                 vec![
-                    format!("{:?}", state.gdb_ctx.state).into(),
+                    format!("{:?} - ", app_state.gdb_ctx.state).into(),
                     "Press ".into(),
                     "Esc".bold(),
                     " to stop editing, ".into(),
@@ -330,7 +315,7 @@ impl App {
         let help_message = Paragraph::new(text);
         frame.render_widget(help_message, help_area);
 
-        let state_message = Paragraph::new(format!("{:#?}", state));
+        let state_message = Paragraph::new(format!("{:#?}", app_state)).scroll((525, 0));
         frame.render_widget(state_message, state_area);
 
         let input = Paragraph::new(self.input.as_str())

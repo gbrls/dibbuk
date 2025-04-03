@@ -35,7 +35,7 @@ pub struct GdbIo {
 }
 
 #[derive(Clone, Debug)]
-pub enum GdbCommand {
+pub enum StdinCommand {
     AddBreakpoint(String),
     Input(String),
     StepInstruction,
@@ -53,7 +53,7 @@ pub enum OutputKind {
 }
 
 #[derive(Clone, Debug)]
-pub struct OutputEvent {
+pub struct MiOutput {
     pub mi: Option<parser::MiRecord>,
     pub string: OutputKind,
 }
@@ -104,8 +104,8 @@ pub async fn spawn_gdb_process(gdb_path: &str) -> Result<GdbIo, GdbProcessError>
 }
 
 pub async fn run_event_loop(
-    cmd_rx: UnboundedReceiver<GdbCommand>,
-    stdout_tx: tokio::sync::broadcast::Sender<OutputEvent>,
+    cmd_rx: UnboundedReceiver<StdinCommand>,
+    stdout_tx: tokio::sync::broadcast::Sender<MiOutput>,
 ) {
     println!("[Proxy Setup] Attempting to spawn GDB...");
     let gdb_io_result = spawn_gdb_process("gdb").await;
@@ -149,7 +149,7 @@ pub async fn run_event_loop(
                     //println!("{}", line_buf);
                     //println!("{:?}", crate::parser::parse_mi_line(&line_buf));
                     stdout_tx
-                        .send(OutputEvent {
+                        .send(MiOutput {
                             string: OutputKind::Stdout(line_buf.clone()),
                             mi: match parser::parse_mi_line(&line_buf) {
                                 Err(e) => {
@@ -243,9 +243,9 @@ pub async fn run_event_loop(
     println!("--- GDB MI Proxy End ---");
 }
 
-async fn gdb_commands_loop(mut gdb_stdin: ChildStdin, mut cmd_rx: UnboundedReceiver<GdbCommand>) {
+async fn gdb_commands_loop(mut gdb_stdin: ChildStdin, mut cmd_rx: UnboundedReceiver<StdinCommand>) {
     while let Some(cmd) = cmd_rx.recv().await {
-        use GdbCommand::*;
+        use StdinCommand::*;
         let mut cmd_ascii = match cmd {
             AddBreakpoint(loc) => format!("-break-insert {}", loc),
             Run => "-exec-run".into(),

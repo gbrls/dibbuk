@@ -1,26 +1,92 @@
-mod app;
+mod mi2command;
 mod elf;
-mod gdb;
 mod parser;
+mod process;
 mod tui;
+
+use tokio::sync::broadcast;
+use tokio::sync::mpsc;
+
+#[derive(Debug)]
+pub struct AppState {
+    pub gdb_ctx: mi2command::GdbContext,
+}
+
+#[derive(Debug)]
+pub struct AppChannels {
+    gdb_stdin_tx: mpsc::UnboundedSender<process::StdinCommand>,
+    gdb_mi_rx: broadcast::Receiver<process::MiOutput>,
+}
+
+#[derive(Debug)]
+pub struct AppDataHandle {
+    channels: AppChannels,
+    state: std::sync::Arc<tokio::sync::RwLock<AppState>>,
+}
+
+impl AppDataHandle {
+    pub fn new(
+        state: std::sync::Arc<tokio::sync::RwLock<AppState>>,
+        gdb_stdin_tx: mpsc::UnboundedSender<process::StdinCommand>,
+        gdb_mi_rx: broadcast::Receiver<process::MiOutput>,
+    ) -> Self {
+        Self {
+            state,
+            channels: AppChannels {
+                gdb_stdin_tx,
+                gdb_mi_rx,
+            },
+        }
+    }
+}
+
+struct App {
+    pub gdb_stdin_tx: mpsc::UnboundedSender<process::StdinCommand>,
+    pub gdb_mi_tx: broadcast::Sender<process::MiOutput>,
+    pub state: std::sync::Arc<tokio::sync::RwLock<AppState>>,
+}
+
+impl App {
+    fn new() -> (Self, mpsc::UnboundedReceiver<process::StdinCommand>) {
+        let (gdb_stdin_tx, gdb_stdin_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (gdb_mi_tx, _) = tokio::sync::broadcast::channel(16);
+        let state = std::sync::Arc::new(tokio::sync::RwLock::new(AppState {
+            gdb_ctx: mi2command::GdbContext::new(),
+        }));
+
+        (
+            Self {
+                gdb_stdin_tx,
+                gdb_mi_tx,
+                state,
+            },
+            gdb_stdin_rx,
+        )
+    }
+
+    pub fn data_handle(&self) -> AppDataHandle {
+        AppDataHandle::new(
+            self.state.clone(),
+            self.gdb_stdin_tx.clone(),
+            self.gdb_mi_tx.subscribe(),
+        )
+    }
+}
 
 #[tokio::main]
 async fn main() {
-    let (gdb_command_tx, gdb_command_rx) = tokio::sync::mpsc::unbounded_channel();
-    let (gdb_output_tx, _) = tokio::sync::broadcast::channel(16);
+    let (app, gdb_stdin_rx) = App::new();
 
-    let ctx_ref = std::sync::Arc::new(tokio::sync::RwLock::new(app::DibbukState::new()));
-
-    // 1. Initial command sender (fire-and-forget)
+    // initial commands to gdb
     tokio::spawn({
-        let gdb_command_tx = gdb_command_tx.clone();
+        let gdb_command_tx = app.gdb_stdin_tx.clone();
         async move {
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;
             let start_cmds = vec![
-                gdb::GdbCommand::AddBreakpoint("main".into()),
-                gdb::GdbCommand::Run,
-                gdb::GdbCommand::GetRegisterNames,
-                gdb::GdbCommand::GetRegisterValues,
+                process::StdinCommand::AddBreakpoint("main".into()),
+                process::StdinCommand::Run,
+                process::StdinCommand::GetRegisterNames,
+                process::StdinCommand::GetRegisterValues,
             ];
 
             for cmd in start_cmds {
@@ -29,38 +95,14 @@ async fn main() {
         }
     });
 
-    // 2. GDB event loop (main processor)
-    let gdb_handle = tokio::spawn(gdb::run_event_loop(gdb_command_rx, gdb_output_tx.clone()));
-
-    let mut gdb_rx = gdb_output_tx.subscribe();
-    let gdb_tx = gdb_command_tx.clone();
-
-    let app_handle = tokio::spawn(app::DibbukState::run(ctx_ref.clone(), gdb_rx, gdb_tx));
-
-    // 3. Output listener (with proper broadcast subscription)
-    //let gdb_printer_handle = tokio::spawn(async move {
-    //    while let Ok(event) = gdb_rx.recv().await {
-    //        //println!("{:#?}", event.mi);
-    //    }
-    //    println!("output rx done");
-    //});
-
-    let gdb_tx = gdb_command_tx.clone();
-    let gdb_rx = gdb_output_tx.subscribe();
-
-    //tui::run(ctx_ref.clone(), gdb_tx, gdb_rx).await;
-    let tui_handle = tokio::spawn(async move {
-        tui::run(ctx_ref.clone(), gdb_tx, gdb_rx).await;
-    });
+    let gdb_handle = tokio::spawn(process::run_event_loop(gdb_stdin_rx, app.gdb_mi_tx.clone()));
+    let app_handle = tokio::spawn(mi2command::run(app.data_handle()));
+    let tui_handle = tokio::spawn(tui::run(app.data_handle()));
 
     // 4. Shutdown handler
     tokio::select! {
         _ = tui_handle => {},
         _ = gdb_handle => {},
-        //_ = gdb_printer_handle => {},
-        //_ = tokio::signal::ctrl_c() => {
-        //    println!("Shutting down...");
-        //    gdb_command_tx.send(gdb::GdbCommand::Quit).unwrap();
-        //}
+        _ = app_handle => {},
     }
 }
