@@ -107,6 +107,10 @@ impl App {
                     terminal.draw(|frame| self.draw(frame, r))?;
               },
 
+                event = self.app_data.channels.event_rx.recv().fuse() => {
+                self.messages.push(format!("[evt] {:?}", event));
+            }
+
                 // Handle GDB output events
                 result = self.app_data.channels.gdb_mi_rx.recv().fuse() => {
                     match result {
@@ -346,10 +350,10 @@ impl App {
             .iter()
             .map(|m| {
                 let content = Line::from(Span::raw(format!("{m}")));
-                ListItem::new(content).style(Style::default().fg(if m.starts_with("[mi]") {
-                    Color::Blue
-                } else {
-                    Color::White
+                ListItem::new(content).style(Style::default().fg(match m {
+                    m if m.starts_with("[mi]") => Color::Blue,
+                    m if m.starts_with("[evt]") => Color::Yellow,
+                    _ => Color::White,
                 }))
             })
             .collect();

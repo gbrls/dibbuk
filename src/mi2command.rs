@@ -11,6 +11,12 @@ pub enum GdbState {
     Stopped,
 }
 
+#[derive(Debug, Clone)]
+pub enum GdbMessage {
+    RegisterValue(Vec<(String, u64)>),
+    StateUpdate(GdbState),
+}
+
 #[derive(Debug)]
 pub struct GdbContext {
     pub register_name: HashMap<usize, String>,
@@ -38,6 +44,8 @@ pub async fn run(mut data: crate::AppDataHandle) {
             use crate::parser::MiRecord;
             use crate::parser::MiValue;
             use crate::parser::ResultRecord;
+            use crate::AppEvent::Gdb;
+            use GdbMessage::*;
             match cmd.mi {
                 None => {}
                 Some(MiRecord::Result(ResultRecord { results, .. }))
@@ -59,6 +67,7 @@ pub async fn run(mut data: crate::AppDataHandle) {
                     println!("register values!");
                     //Tuple([("number", Const("0")), ("value", Const("0x5555555555d0"))]),
                     if let MiValue::List(tuple_list) = results.get("register-values").unwrap() {
+                        let mut register_values = Vec::new();
                         for tpl in tuple_list {
                             if let MiValue::Tuple(tpl) = tpl {
                                 let mut idx: Option<u64> = None;
@@ -95,28 +104,47 @@ pub async fn run(mut data: crate::AppDataHandle) {
                                     (Some(k), Some(v)) => {
                                         let mut state = data.state.write().await;
                                         state.gdb_ctx.register_value.insert(k.clone(), v);
+                                        register_values.push((k.clone(), v));
                                     }
                                     _ => {}
                                 }
                             }
                         }
+
+                        data.channels
+                            .event_tx
+                            .send(Gdb(RegisterValue(register_values)))
+                            .unwrap();
                     }
                 }
                 Some(MiRecord::ExecAsync(AsyncRecord {
                     kind: AsyncKind::Exec,
                     class,
                     ..
-                })) => match class.as_str() {
-                    "stopped" => {
-                        let mut state = data.state.write().await;
-                        state.gdb_ctx.state = GdbState::Stopped
+                })) => {
+                    let update = match class.as_str() {
+                        "stopped" => {
+                            let updated = GdbState::Stopped;
+                            let mut state = data.state.write().await;
+                            state.gdb_ctx.state = updated;
+                            Some(updated)
+                        }
+                        "running" => {
+                            let updated = GdbState::Running;
+                            let mut state = data.state.write().await;
+                            state.gdb_ctx.state = updated;
+                            Some(updated)
+                        }
+                        _ => None,
+                    };
+
+                    if update.is_some() {
+                        data.channels
+                            .event_tx
+                            .send(Gdb(StateUpdate(update.unwrap())))
+                            .unwrap();
                     }
-                    "running" => {
-                        let mut state = data.state.write().await;
-                        state.gdb_ctx.state = GdbState::Running
-                    }
-                    _ => {}
-                },
+                }
                 _ => {}
             }
         }

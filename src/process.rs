@@ -9,7 +9,6 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::{
     io::{stdin, AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::{Child, ChildStderr, ChildStdin, ChildStdout, Command},
-    // No longer need select! if using separate tasks for stdout/stderr
 };
 
 #[derive(Error, Debug)]

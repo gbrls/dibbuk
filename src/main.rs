@@ -1,11 +1,16 @@
-mod mi2command;
 mod elf;
+mod mi2command;
 mod parser;
 mod process;
 mod tui;
 
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
+
+#[derive(Debug, Clone)]
+pub enum AppEvent {
+    Gdb(mi2command::GdbMessage),
+}
 
 #[derive(Debug)]
 pub struct AppState {
@@ -16,6 +21,8 @@ pub struct AppState {
 pub struct AppChannels {
     gdb_stdin_tx: mpsc::UnboundedSender<process::StdinCommand>,
     gdb_mi_rx: broadcast::Receiver<process::MiOutput>,
+    event_tx: broadcast::Sender<AppEvent>,
+    event_rx: broadcast::Receiver<AppEvent>,
 }
 
 #[derive(Debug)]
@@ -29,12 +36,16 @@ impl AppDataHandle {
         state: std::sync::Arc<tokio::sync::RwLock<AppState>>,
         gdb_stdin_tx: mpsc::UnboundedSender<process::StdinCommand>,
         gdb_mi_rx: broadcast::Receiver<process::MiOutput>,
+        event_rx: broadcast::Receiver<AppEvent>,
+        event_tx: broadcast::Sender<AppEvent>,
     ) -> Self {
         Self {
             state,
             channels: AppChannels {
                 gdb_stdin_tx,
                 gdb_mi_rx,
+                event_tx,
+                event_rx,
             },
         }
     }
@@ -44,12 +55,14 @@ struct App {
     pub gdb_stdin_tx: mpsc::UnboundedSender<process::StdinCommand>,
     pub gdb_mi_tx: broadcast::Sender<process::MiOutput>,
     pub state: std::sync::Arc<tokio::sync::RwLock<AppState>>,
+    pub event_tx: broadcast::Sender<AppEvent>,
 }
 
 impl App {
     fn new() -> (Self, mpsc::UnboundedReceiver<process::StdinCommand>) {
         let (gdb_stdin_tx, gdb_stdin_rx) = tokio::sync::mpsc::unbounded_channel();
         let (gdb_mi_tx, _) = tokio::sync::broadcast::channel(16);
+        let (event_tx, _) = tokio::sync::broadcast::channel(16);
         let state = std::sync::Arc::new(tokio::sync::RwLock::new(AppState {
             gdb_ctx: mi2command::GdbContext::new(),
         }));
@@ -58,6 +71,7 @@ impl App {
             Self {
                 gdb_stdin_tx,
                 gdb_mi_tx,
+                event_tx,
                 state,
             },
             gdb_stdin_rx,
@@ -69,6 +83,8 @@ impl App {
             self.state.clone(),
             self.gdb_stdin_tx.clone(),
             self.gdb_mi_tx.subscribe(),
+            self.event_tx.subscribe(),
+            self.event_tx.clone(),
         )
     }
 }
