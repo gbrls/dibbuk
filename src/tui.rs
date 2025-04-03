@@ -55,6 +55,7 @@ pub struct App {
     input_mode: InputMode,
     /// History of commands sent and GDB output received
     messages: Vec<String>, // Combine GDB output and commands here for simplicity
+    message_list_state: std::cell::RefCell<ratatui::widgets::ListState>,
     //
     app_data: crate::AppDataHandle,
 }
@@ -73,6 +74,7 @@ impl App {
             messages: Vec::new(),
             inputs: Vec::new(),
             character_index: 0,
+            message_list_state: std::cell::RefCell::new(ratatui::widgets::ListState::default()),
             app_data,
         }
     }
@@ -109,6 +111,14 @@ impl App {
 
                 event = self.app_data.channels.event_rx.recv().fuse() => {
                 self.messages.push(format!("[evt] {:?}", event));
+
+                let num_messages = self.messages.len();
+                if num_messages > 0 {
+                    // Select the *last* index
+                    self.message_list_state.borrow_mut().select(Some(num_messages - 1));
+                } else {
+                    self.message_list_state.borrow_mut().select(None); // Deselect if list is empty
+                }
             }
 
                 // Handle GDB output events
@@ -319,12 +329,77 @@ impl App {
         let help_message = Paragraph::new(text);
         frame.render_widget(help_message, help_area);
 
-        //let state_message = Paragraph::new(format!("{:#?}", app_state)).scroll((525, 0));
+        let register_names = app_state.gdb_ctx.register_value.keys();
         let state_message = Paragraph::new(format!(
             "rip -> {:#x}",
             app_state.gdb_ctx.register_value.get("rip").unwrap_or(&0)
         ));
-        frame.render_widget(state_message, state_area);
+
+        let common_x64_registers = [
+            // General Purpose Registers
+            "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp", "r8", "r9", "r10", "r11", "r12",
+            "r13", "r14", "r15",    // Instruction Pointer
+            "rip",    // Flags Register
+            "rflags", // or "eflags" if that's what gdb provides
+        ];
+
+        use ratatui::widgets::{Cell, Row, Table};
+        // 2. Create header row
+        let header_cells = ["Register", "Value"]
+            .iter()
+            .map(|h| Cell::from(*h).style(Style::default().bold())); // Style header
+        let header = Row::new(header_cells)
+            .style(Style::default().blue()) // Style header row background/foreground
+            .height(1) // Explicit height
+            .bottom_margin(1); // Margin below header
+
+        // 3. Create data rows by iterating through the desired registers
+        let rows = common_x64_registers.iter().map(|&reg_name| {
+            // Get the value from your context, default to 0 if not found
+            let value = app_state
+                .gdb_ctx
+                .register_value
+                .get(reg_name)
+                .copied()
+                .unwrap_or(0);
+
+            // Format the value as padded hex (0x prefix, 16 hex digits for 64-bit)
+            // Adjust padding (e.g., {:#x}) if you prefer variable width
+            let formatted_value = format!("{:#018x}", value);
+
+            // Create cells for the row
+            let cells = vec![Cell::from(reg_name), Cell::from(formatted_value)];
+            Row::new(cells).height(1) // Each row takes 1 line
+        });
+
+        // 4. Define column constraints (widths)
+        // Adjust lengths as needed for your layout and register name lengths
+        let widths = [
+            Constraint::Length(8),  // Width for register names (e.g., "rflags")
+            Constraint::Length(20), // Width for "0x" + 16 hex digits + padding
+        ];
+
+        // 5. Create the table widget
+        let register_table = Table::new(rows, widths) // Pass rows and widths
+            .header(header) // Set the header row
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Registers (x64)"),
+            ) // Add a block with title and borders
+            .column_spacing(2); // Add spacing between columns
+
+        let tbl = ratatui::widgets::Table::new(
+            vec![ratatui::widgets::Row::new(vec!["a", "b", "c"])],
+            [
+                // + 1 is for padding.
+                Constraint::Min(1),
+                Constraint::Min(1),
+                Constraint::Min(1),
+            ],
+        );
+        //frame.render_widget(state_message, state_area);
+        frame.render_widget(register_table, state_area);
 
         let input = Paragraph::new(self.input.as_str())
             .style(match self.input_mode {
@@ -349,20 +424,38 @@ impl App {
             )),
         }
 
-        let messages: Vec<ListItem> = self
+        let list_items: Vec<ListItem> = self
             .messages
             .iter()
-            .map(|m| {
-                let content = Line::from(Span::raw(format!("{m}")));
-                ListItem::new(content).style(Style::default().fg(match m {
+            .enumerate() // Use enumerate if you might need index later, otherwise not strictly needed here
+            .map(|(_index, m)| {
+                // Keep the prefix check for coloring
+                let color = match m {
                     m if m.starts_with("[mi]") => Color::Blue,
                     m if m.starts_with("[evt]") => Color::Yellow,
-                    _ => Color::White,
-                }))
+                    _ => Color::White, // Or maybe Gray/Reset for default?
+                };
+                // Create the content line
+                let content = Line::from(Span::styled(m.clone(), Style::default().fg(color)));
+                ListItem::new(content) // No specific style needed here if applying color via Span
             })
             .collect();
-        let messages = List::new(messages).block(Block::bordered().title("Messages"));
-        frame.render_widget(messages, messages_area);
+
+        // 2. Create the List widget - Add highlighting styles
+        let messages_list = List::new(list_items)
+            .block(Block::default().borders(Borders::ALL).title("Messages"))
+            .highlight_symbol("> "); // Symbol to show next to the selected line
+
+        // 3. Update the state to select the last item (if any)
+        // This ensures the view scrolls to the bottom.
+
+        // 4. Render using render_stateful_widget
+        // Note: Pass `&mut self.message_list_state`
+        frame.render_stateful_widget(
+            messages_list,
+            messages_area,
+            &mut self.message_list_state.borrow_mut(),
+        );
     }
     /// Renders the UI frame.
     fn render(&self, frame: &mut Frame) {
