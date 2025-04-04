@@ -4,7 +4,7 @@ use crate::process;
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::mpsc::UnboundedSender;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum GdbState {
     Unknown,
     Running,
@@ -12,11 +12,20 @@ pub enum GdbState {
     Exited,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Disassembly {
+    pub str: String,
+    pub func: String,
+    pub offset: usize,
+    pub addr: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum GdbMessage {
     RegisterValue(Vec<(String, u64)>),
     UpdatedRegisters(Vec<usize>),
     StateUpdate(GdbState),
+    DisassemblyNative(Vec<Disassembly>),
 }
 
 #[derive(Debug)]
@@ -24,6 +33,7 @@ pub struct GdbContext {
     pub register_name: HashMap<usize, String>,
     pub register_id: HashMap<String, usize>,
     pub register_value: HashMap<String, u64>,
+
     pub state: GdbState,
 }
 
@@ -123,6 +133,59 @@ pub async fn run(mut data: crate::AppDataHandle) {
                             .event_tx
                             .send(Gdb(UpdatedRegisters(v)))
                             .unwrap();
+                    }
+                }
+
+                Some(MiRecord::Result(ResultRecord { results, .. }))
+                    if results.contains_key("asm_insns") =>
+                {
+                    // [mi] Result(ResultRecord { token: None, class: "done", results: {"asm_insns": List([Tuple([("address", Const("0x00005555555555d5")), ("func-name", Const("main")), ("offset", Const("5")), ("inst", Const("push   %r13"))])
+                    if let MiValue::List(asm_tuples) = results.get("asm_insns").unwrap() {
+                        let mut asm_lines = Vec::new();
+                        for mival_asmtuples in asm_tuples {
+                            let mut addr = None;
+                            let mut offset = None;
+                            let mut fname = None;
+                            let mut inst = None;
+                            if let MiValue::Tuple(asm_tuple) = mival_asmtuples {
+                                for (k, v) in asm_tuple {
+                                    match (k.as_str(), v) {
+                                        ("address", MiValue::Const(v)) => {
+                                            addr = usize::from_str_radix(
+                                                v.as_str().strip_prefix("0x").unwrap_or(""),
+                                                16,
+                                            )
+                                            .ok()
+                                        }
+
+                                        ("offset", MiValue::Const(v)) => {
+                                            offset = usize::from_str_radix(v, 10).ok()
+                                        }
+                                        ("func-name", MiValue::Const(v)) => fname = Some(v),
+                                        ("inst", MiValue::Const(v)) => inst = Some(v),
+                                        _ => {}
+                                    }
+                                }
+                            }
+
+                            match (addr, offset, fname, inst) {
+                                (Some(addr), Some(offset), Some(fname), Some(instr)) => asm_lines
+                                    .push(Disassembly {
+                                        offset,
+                                        addr,
+                                        str: instr.clone(),
+                                        func: fname.clone(),
+                                    }),
+                                _ => {}
+                            }
+                        }
+
+                        if asm_lines.len() > 0 {
+                            data.channels
+                                .event_tx
+                                .send(Gdb(DisassemblyNative(asm_lines)))
+                                .unwrap();
+                        }
                     }
                 }
 

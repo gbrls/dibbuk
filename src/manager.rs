@@ -1,3 +1,5 @@
+// -thread-info -> pid -> /proc/pid/maps
+
 pub async fn run(mut data: crate::AppDataHandle) {
     use crate::mi2command::GdbMessage::*;
     use crate::mi2command::GdbState;
@@ -8,6 +10,10 @@ pub async fn run(mut data: crate::AppDataHandle) {
             match cmd {
                 Gdb(StateUpdate(GdbState::Stopped)) => {
                     data.channels.gdb_stdin_tx.send(GetRegisterUpdates).unwrap();
+                    data.channels
+                        .gdb_stdin_tx
+                        .send(GetDisassemblyRel(0, 32))
+                        .unwrap();
                 }
                 Gdb(UpdatedRegisters(ids)) => {
                     data.channels

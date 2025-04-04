@@ -1,3 +1,4 @@
+mod components;
 mod elf;
 mod manager;
 mod mi2command;
@@ -8,9 +9,21 @@ mod tui;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialOrd, Eq, Ord)]
 pub enum AppEvent {
     Gdb(mi2command::GdbMessage),
+    Any,
+}
+
+impl PartialEq for AppEvent {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (AppEvent::Any, _) => true,
+            (_, AppEvent::Any) => true,
+
+            (AppEvent::Gdb(gdb_self), AppEvent::Gdb(gdb_other)) => gdb_self == gdb_other,
+        }
+    }
 }
 
 #[derive(Debug)]

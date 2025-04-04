@@ -43,6 +43,7 @@ pub enum StdinCommand {
     GetAllRegisterValues,
     GetRegisterValues(Vec<usize>),
     GetRegisterUpdates,
+    GetDisassemblyRel(u64, u64),
     Quit,
 }
 
@@ -259,6 +260,9 @@ async fn gdb_commands_loop(mut gdb_stdin: ChildStdin, mut cmd_rx: UnboundedRecei
                 base
             }
             GetRegisterUpdates => "-data-list-changed-registers".into(),
+            GetDisassemblyRel(start, end) => {
+                format!("-data-disassemble -s \"$pc-{}\" -e \"$pc+{}\"", start, end)
+            }
             Quit => "exit".into(),
             Input(s) => s,
             _ => todo!("ops..."),
