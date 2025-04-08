@@ -37,9 +37,16 @@ use tuirealm::event::NoUserEvent;
 use tuirealm::MockComponent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UiState {
+    Default,
+    Help,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Id {
     Logs,
     Help,
+    Welcome,
 }
 
 use tuirealm::props::{Alignment, TextModifiers};
@@ -50,6 +57,8 @@ pub enum Msg {
     Quit,
     Empty,
     Log,
+    ShowHelp,
+    HideHelp,
 }
 
 pub struct Model<T>
@@ -65,6 +74,7 @@ where
     /// Used to draw to terminal
     pub terminal: TerminalBridge<T>,
     pub app_data_handle: crate::AppDataHandle,
+    pub ui_state: UiState,
 }
 
 impl Model<CrosstermTerminalAdapter> {
@@ -75,6 +85,7 @@ impl Model<CrosstermTerminalAdapter> {
             redraw: true,
             terminal: TerminalBridge::init_crossterm().expect("Cannot initialize terminal"),
             app_data_handle: app_data,
+            ui_state: UiState::Default,
         }
     }
 }
@@ -101,8 +112,18 @@ where
                         .as_ref(),
                     )
                     .split(f.area());
-                self.app.view(&Id::Logs, f, chunks[0]);
-                self.app.view(&Id::Help, f, chunks[0]);
+
+                match self.ui_state {
+                    UiState::Default => {
+                        self.app.view(&Id::Logs, f, chunks[0]);
+                        //self.app.view(&Id::Help, f, chunks[0]);
+                    }
+
+                    UiState::Help => {
+                        self.app.view(&Id::Logs, f, chunks[0]);
+                        self.app.view(&Id::Help, f, chunks[0]);
+                    }
+                }
             })
             .is_ok());
     }
@@ -138,13 +159,15 @@ where
             .mount(Id::Help, Box::new(Help::default()), Vec::default())
             .is_ok());
 
-        assert!(app
-            .subscribe(
-                &Id::Logs,
-                Sub::new(SubEventClause::User(AppEvent::Any), SubClause::Always)
-            )
-            .is_ok());
+        //assert!(app
+        //    .subscribe(
+        //        &Id::Logs,
+        //        Sub::new(SubEventClause::User(AppEvent::Any), SubClause::Always)
+        //    )
+        //    .is_ok());
 
+        // active!
+        //assert!(app.active(&Id::Help).is_ok());
         assert!(app.active(&Id::Logs).is_ok());
         app
     }
@@ -155,7 +178,6 @@ where
     T: TerminalAdapter,
 {
     fn update(&mut self, msg: Option<Msg>) -> Option<Msg> {
-        assert!(self.app.active(&Id::Logs).is_ok());
         if let Some(msg) = msg {
             // Set redraw
             self.redraw = true;
@@ -167,6 +189,17 @@ where
                 }
                 Msg::Empty => None,
                 Msg::Log => None,
+                Msg::ShowHelp => {
+                    assert!(self.app.active(&Id::Help).is_ok());
+                    self.ui_state = UiState::Help;
+                    None
+                }
+
+                Msg::HideHelp => {
+                    assert!(self.app.blur().is_ok());
+                    self.ui_state = UiState::Default;
+                    None
+                }
             }
         } else {
             None

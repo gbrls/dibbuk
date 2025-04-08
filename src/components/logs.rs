@@ -146,6 +146,14 @@ impl Component<Msg, AppEvent> for Logs {
                 modifiers: KeyModifiers::NONE,
                 ..
             }) => return Some(Msg::Quit),
+
+            Event::Keyboard(KeyEvent {
+                code: Key::Char('?'),
+                modifiers: KeyModifiers::NONE,
+            }) => {
+                //Cmd::Submit
+                return Some(Msg::ShowHelp);
+            }
             Event::Keyboard(_) => Cmd::Submit,
             Event::User(app_event) => {
                 self.logs.push(format!("{:?}", app_event));

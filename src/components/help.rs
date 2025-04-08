@@ -108,13 +108,16 @@ impl MockComponent for Help {
                 )
                 .unwrap_text_modifiers();
             frame.render_widget(
-                Paragraph::new("hi").block(Block::bordered().title("help").border_style(
-                    match focus {
-                        true => Style::new().blue(),
-                        false => Style::new().dark_gray(),
-                    },
-                )),
-                Help::centered_rect(frame.area(), 20, 20),
+                Paragraph::new("global: ? for help, Esc to exit\nlogs: kj to up and down, / for search").block(
+                    Block::bordered()
+                        .title("help - press any key to exit")
+                        .title_alignment(Alignment::Center)
+                        .border_style(match focus {
+                            true => Style::new().blue(),
+                            false => Style::new().dark_gray(),
+                        }),
+                ),
+                Help::centered_rect(frame.area(), 40, 40),
             );
         }
     }
@@ -140,6 +143,9 @@ impl MockComponent for Help {
 
 impl Component<Msg, AppEvent> for Help {
     fn on(&mut self, e: Event<AppEvent>) -> Option<Msg> {
-        None
+        match e {
+            Event::Keyboard(KeyEvent { .. }) => Some(Msg::HideHelp),
+            _ => None,
+        }
     }
 }
