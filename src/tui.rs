@@ -46,6 +46,8 @@ pub enum UiState {
 pub enum Id {
     Logs,
     Help,
+    Registers,
+    Disassembly,
     Welcome,
 }
 
@@ -100,14 +102,15 @@ where
             .terminal
             .draw(|f| {
                 let chunks = Layout::default()
-                    .direction(Direction::Vertical)
+                    .direction(Direction::Horizontal)
                     .margin(1)
                     .constraints(
                         [
-                            Constraint::Min(1), // Clock
-                                                //Constraint::Length(3), // Letter Counter
-                                                //Constraint::Length(3), // Digit Counter
-                                                //Constraint::Length(1), // Label
+                            Constraint::Min(1),  // Clock
+                            Constraint::Max(60), // Letter Counter
+                            Constraint::Max(80),  // Clock
+                                                 //Constraint::Length(3), // Digit Counter
+                                                 //Constraint::Length(1), // Label
                         ]
                         .as_ref(),
                     )
@@ -116,11 +119,15 @@ where
                 match self.ui_state {
                     UiState::Default => {
                         self.app.view(&Id::Logs, f, chunks[0]);
+                        self.app.view(&Id::Registers, f, chunks[1]);
+                        self.app.view(&Id::Disassembly, f, chunks[2]);
                         //self.app.view(&Id::Help, f, chunks[0]);
                     }
 
                     UiState::Help => {
                         self.app.view(&Id::Logs, f, chunks[0]);
+                        self.app.view(&Id::Registers, f, chunks[1]);
+                        self.app.view(&Id::Disassembly, f, chunks[2]);
                         self.app.view(&Id::Help, f, chunks[0]);
                     }
                 }
@@ -157,6 +164,36 @@ where
 
         assert!(app
             .mount(Id::Help, Box::new(Help::default()), Vec::default())
+            .is_ok());
+
+        assert!(app
+            .mount(
+                Id::Registers,
+                Box::new(Registers::default()),
+                Vec::default()
+            )
+            .is_ok());
+
+        assert!(app
+            .subscribe(
+                &Id::Registers,
+                Sub::new(SubEventClause::User(AppEvent::Any), SubClause::Always)
+            )
+            .is_ok());
+
+        assert!(app
+            .mount(
+                Id::Disassembly,
+                Box::new(Disassembly::default()),
+                Vec::default()
+            )
+            .is_ok());
+
+        assert!(app
+            .subscribe(
+                &Id::Disassembly,
+                Sub::new(SubEventClause::User(AppEvent::Any), SubClause::Always)
+            )
             .is_ok());
 
         //assert!(app

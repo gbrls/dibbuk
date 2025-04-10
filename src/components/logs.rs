@@ -16,8 +16,6 @@ use tuirealm::{
     Application, AttrValue, Attribute, EventListenerCfg, Sub, SubClause, SubEventClause, Update,
 };
 
-use tuirealm::terminal::{CrosstermTerminalAdapter, TerminalAdapter, TerminalBridge};
-
 use crate::AppEvent;
 use tuirealm::MockComponent;
 
