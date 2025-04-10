@@ -49,6 +49,7 @@ pub enum Id {
     Registers,
     Disassembly,
     Welcome,
+    GDbUserInput,
 }
 
 use tuirealm::props::{Alignment, TextModifiers};
@@ -61,6 +62,7 @@ pub enum Msg {
     Log,
     ShowHelp,
     HideHelp,
+    GdbInput(String),
 }
 
 pub struct Model<T>
@@ -108,24 +110,35 @@ where
                         [
                             Constraint::Min(1),  // Clock
                             Constraint::Max(60), // Letter Counter
-                            Constraint::Max(80),  // Clock
-                                                 //Constraint::Length(3), // Digit Counter
-                                                 //Constraint::Length(1), // Label
+                            Constraint::Max(80), // Clock
                         ]
                         .as_ref(),
                     )
                     .split(f.area());
 
+                let left_chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints(
+                        [
+                            Constraint::Max(8), // Clock
+                            Constraint::Min(1), // Clock
+                        ]
+                        .as_ref(),
+                    )
+                    .split(chunks[0]);
+
                 match self.ui_state {
                     UiState::Default => {
-                        self.app.view(&Id::Logs, f, chunks[0]);
+                        self.app.view(&Id::Logs, f, left_chunks[1]);
+                        self.app.view(&Id::GDbUserInput, f, left_chunks[0]);
                         self.app.view(&Id::Registers, f, chunks[1]);
                         self.app.view(&Id::Disassembly, f, chunks[2]);
                         //self.app.view(&Id::Help, f, chunks[0]);
                     }
 
                     UiState::Help => {
-                        self.app.view(&Id::Logs, f, chunks[0]);
+                        self.app.view(&Id::Logs, f, left_chunks[1]);
+                        self.app.view(&Id::GDbUserInput, f, left_chunks[0]);
                         self.app.view(&Id::Registers, f, chunks[1]);
                         self.app.view(&Id::Disassembly, f, chunks[2]);
                         self.app.view(&Id::Help, f, chunks[0]);
@@ -168,6 +181,14 @@ where
 
         assert!(app
             .mount(
+                Id::GDbUserInput,
+                Box::new(GdbInput::default()),
+                Vec::default()
+            )
+            .is_ok());
+
+        assert!(app
+            .mount(
                 Id::Registers,
                 Box::new(Registers::default()),
                 Vec::default()
@@ -196,16 +217,17 @@ where
             )
             .is_ok());
 
-        //assert!(app
-        //    .subscribe(
-        //        &Id::Logs,
-        //        Sub::new(SubEventClause::User(AppEvent::Any), SubClause::Always)
-        //    )
-        //    .is_ok());
+        assert!(app
+            .subscribe(
+                &Id::Logs,
+                Sub::new(SubEventClause::User(AppEvent::Any), SubClause::Always)
+            )
+            .is_ok());
 
         // active!
         //assert!(app.active(&Id::Help).is_ok());
-        assert!(app.active(&Id::Logs).is_ok());
+        //assert!(app.active(&Id::Logs).is_ok());
+        assert!(app.active(&Id::GDbUserInput).is_ok());
         app
     }
 }
@@ -235,6 +257,18 @@ where
                 Msg::HideHelp => {
                     assert!(self.app.blur().is_ok());
                     self.ui_state = UiState::Default;
+                    None
+                }
+
+                Msg::GdbInput(cmd) => {
+                    tokio::spawn({
+                        let gdb_command_tx = self.app_data_handle.channels.gdb_stdin_tx.clone();
+                        async move {
+                            gdb_command_tx
+                                .send(process::StdinCommand::Input(cmd))
+                                .unwrap();
+                        }
+                    });
                     None
                 }
             }

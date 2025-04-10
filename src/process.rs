@@ -247,6 +247,7 @@ pub async fn run_event_loop(
 async fn gdb_commands_loop(mut gdb_stdin: ChildStdin, mut cmd_rx: UnboundedReceiver<StdinCommand>) {
     while let Some(cmd) = cmd_rx.recv().await {
         use StdinCommand::*;
+        //println!("recv!!!! {:?}", cmd);
         let mut cmd_ascii = match cmd {
             AddBreakpoint(loc) => format!("-break-insert {}", loc),
             Run => "-exec-run".into(),

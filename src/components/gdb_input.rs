@@ -8,6 +8,8 @@ use tuirealm::{
     Application, AttrValue, Attribute, EventListenerCfg, Sub, SubClause, SubEventClause, Update,
 };
 
+use tuirealm::event;
+
 use tuirealm::terminal::{CrosstermTerminalAdapter, TerminalAdapter, TerminalBridge};
 
 use crate::AppEvent;
@@ -16,19 +18,21 @@ use tuirealm::MockComponent;
 use tuirealm::props::{Alignment, TextModifiers};
 use tuirealm::{Component, Event, Props, State, StateValue};
 
-pub struct Help {
+pub struct GdbInput {
     props: Props,
+    messages: Vec<String>,
 }
 
-impl Default for Help {
+impl Default for GdbInput {
     fn default() -> Self {
         Self {
             props: Props::default(),
+            messages: Vec::new(),
         }
     }
 }
 
-impl Help {
+impl GdbInput {
     pub fn text<S>(mut self, s: S) -> Self
     where
         S: AsRef<str>,
@@ -78,16 +82,19 @@ impl Help {
     }
 }
 
-impl MockComponent for Help {
+impl MockComponent for GdbInput {
     fn view(&mut self, frame: &mut Frame, area: Rect) {
         // Check if visible
         if self.props.get_or(Attribute::Display, AttrValue::Flag(true)) == AttrValue::Flag(true) {
+            let dstr = String::from("???");
+            let text = self.messages.last().unwrap_or(&dstr);
+            let text = format!("{}\n{:?}", text, self.messages);
+
             // Get properties
             let focus = self
                 .props
                 .get_or(Attribute::Focus, AttrValue::Flag(true))
                 .unwrap_flag();
-            //println!("{:?}", text);
             let alignment = self
                 .props
                 .get_or(Attribute::TextAlign, AttrValue::Alignment(Alignment::Left))
@@ -108,21 +115,10 @@ impl MockComponent for Help {
                 )
                 .unwrap_text_modifiers();
             frame.render_widget(
-                Paragraph::new(
-                    "global: ? for help, Esc to exit\nlogs: kj to up and down, / for search",
-                )
-                .block(
-                    Block::bordered()
-                        .title("help - press any key to exit")
-                        .border_type(BorderType::Rounded)
-                        .title_alignment(Alignment::Center)
-                        .border_style(match focus {
-                            true => Style::new().blue(),
-                            false => Style::new().dark_gray(),
-                        })
-                        .bg(Color::Black),
-                ),
-                Help::centered_rect(frame.area(), 40, 40),
+                Paragraph::new(text.as_str())
+                    .style(Color::Yellow)
+                    .block(Block::bordered().title("input")),
+                area,
             );
         }
     }
@@ -146,10 +142,37 @@ impl MockComponent for Help {
     }
 }
 
-impl Component<Msg, AppEvent> for Help {
+impl Component<Msg, AppEvent> for GdbInput {
     fn on(&mut self, e: Event<AppEvent>) -> Option<Msg> {
         match e {
-            Event::Keyboard(KeyEvent { .. }) => Some(Msg::HideHelp),
+            Event::Keyboard(KeyEvent {
+                code: event::Key::Enter,
+                modifiers: KeyModifiers::NONE,
+            }) => {
+                let mut cmd = self.messages.last().unwrap().clone();
+                if cmd.is_empty() {
+                    cmd = self.messages[self.messages.len() - 2].clone();
+                } else {
+                    self.messages.push(String::new());
+                }
+                Some(Msg::GdbInput(cmd))
+            }
+
+            Event::Keyboard(KeyEvent {
+                code: event::Key::Char(c),
+                modifiers: KeyModifiers::NONE,
+            }) => {
+                if self.messages.is_empty() {
+                    self.messages.push(String::new());
+                }
+
+                self.messages.last_mut().unwrap().push(c);
+
+                //None
+                Some(Msg::Empty)
+                //Some(Msg::Quit)
+            }
+
             _ => None,
         }
     }
