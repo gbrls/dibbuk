@@ -20,9 +20,32 @@ pub struct Disassembly {
     pub addr: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone)]
+pub struct MemMap {
+    pub map_range: proc_maps::MapRange,
+}
+
+impl PartialEq for MemMap {
+    fn eq(&self, other: &Self) -> bool {
+        (self.map_range.start() == other.map_range.start())
+            && (self.map_range.inode == other.map_range.inode)
+    }
+}
+
+impl Eq for MemMap {
+    fn assert_receiver_is_total_eq(&self) {}
+}
+
+impl PartialOrd for MemMap {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.map_range.start().cmp(&other.map_range.start()))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq)]
 pub enum GdbMessage {
     Pid(u64),
+    Maps(Vec<MemMap>),
     RegisterValue(Vec<(String, u64)>),
     UpdatedRegisters(Vec<usize>),
     StateUpdate(GdbState),

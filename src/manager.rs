@@ -23,8 +23,16 @@ pub async fn run(mut data: crate::AppDataHandle) {
                         .unwrap();
                 }
                 Gdb(Pid(pid)) => {
-                    let maps = get_process_maps(pid as i32);
-                    //println!("{:?}", maps)
+                    if let Ok(maps) = get_process_maps(pid as i32) {
+                        data.channels
+                            .event_tx
+                            .send(Gdb(Maps(
+                                maps.into_iter()
+                                    .map(|m| crate::mi2command::MemMap { map_range: m })
+                                    .collect(),
+                            )))
+                            .unwrap();
+                    }
                 }
                 _ => {}
             }

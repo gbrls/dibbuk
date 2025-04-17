@@ -14,6 +14,7 @@ use tuirealm::{
 pub struct Registers {
     props: Props,
     value: HashMap<String, u64>,
+    memory_maps: Vec<crate::mi2command::MemMap>,
 }
 
 impl Default for Registers {
@@ -21,6 +22,7 @@ impl Default for Registers {
         Self {
             props: Props::default(),
             value: HashMap::new(),
+            memory_maps: Vec::new(),
         }
     }
 }
@@ -32,53 +34,84 @@ impl MockComponent for Registers {
             Paragraph::new(format!("rip -> {:#x}", self.value.get("rip").unwrap_or(&0)));
 
         let common_x64_registers = [
-            // General Purpose Registers
-            "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp", "r8", "r9", "r10", "r11", "r12",
-            "r13", "r14", "r15",    // Instruction Pointer
-            "rip",    // Flags Register
-            "rflags", // or "eflags" if that's what gdb provides
+            "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp", "r8", "r9", "r10", "r11",
+            "r12", "r13", "r14", "r15", "rip", "rflags",
         ];
 
         use ratatui::widgets::{Cell, Row, Table};
-        // 2. Create header row
-        let header_cells = ["Register", "Value"]
+        let header_cells = ["Register", "Value?", "Mem"]
             .iter()
-            .map(|h| Cell::from(*h).style(Style::default().bold())); // Style header
+            .map(|h| Cell::from(*h).style(Style::default().bold()));
         let header = Row::new(header_cells)
-            .style(Style::default().blue()) // Style header row background/foreground
-            .height(1) // Explicit height
-            .bottom_margin(1); // Margin below header
+            .style(Style::default().blue())
+            .height(1)
+            .bottom_margin(1);
 
-        // 3. Create data rows by iterating through the desired registers
         let rows = common_x64_registers.iter().map(|&reg_name| {
-            // Get the value from your context, default to 0 if not found
             let value = self.value.get(reg_name).copied().unwrap_or(0);
 
-            // Format the value as padded hex (0x prefix, 16 hex digits for 64-bit)
-            // Adjust padding (e.g., {:#x}) if you prefer variable width
-            let formatted_value = format!("{:#018x}", value);
+            let maybe_range = self.memory_maps.iter().find(|map| {
+                let value = value as usize;
+                value >= map.map_range.start()
+                    && (value < map.map_range.start() + map.map_range.size())
+            });
 
-            // Create cells for the row
-            let cells = vec![Cell::from(reg_name), Cell::from(formatted_value)];
-            Row::new(cells).height(1) // Each row takes 1 line
+            let style = if maybe_range.is_some() {
+                let r = maybe_range.unwrap().map_range.is_read();
+                let w = maybe_range.unwrap().map_range.is_write();
+                let x = maybe_range.unwrap().map_range.is_exec();
+                match (r, w, x) {
+                    (true, true, true) => Style::default().bold().red(),
+                    (true, true, false) => Style::default().blue(),
+                    (true, false, true) => Style::default().yellow(),
+                    (true, false, false) => Style::default().dark_gray(),
+                    _ => Style::default(),
+                }
+            } else {
+                Style::default()
+            };
+
+            let formatted_value = format!("{:#018x}", value);
+            let mem =
+                if maybe_range.is_some() && maybe_range.unwrap().map_range.filename().is_some() {
+                    format!(
+                        "{}",
+                        maybe_range
+                            .unwrap()
+                            .map_range
+                            .filename()
+                            .unwrap()
+                            .file_stem()
+                            .unwrap()
+                            .to_str()
+                            .unwrap()
+                    )
+                } else {
+                    String::from("")
+                };
+
+            let cells = vec![
+                Cell::from(reg_name),
+                Cell::from(formatted_value).style(style),
+                Cell::from(mem),
+            ];
+            Row::new(cells).height(1)
         });
 
-        // 4. Define column constraints (widths)
-        // Adjust lengths as needed for your layout and register name lengths
         let widths = [
-            Constraint::Length(8),  // Width for register names (e.g., "rflags")
-            Constraint::Length(20), // Width for "0x" + 16 hex digits + padding
+            Constraint::Length(8),
+            Constraint::Length(20),
+            Constraint::Length(16),
         ];
 
-        // 5. Create the table widget
-        let register_table = Table::new(rows, widths) // Pass rows and widths
-            .header(header) // Set the header row
+        let register_table = Table::new(rows, widths)
+            .header(header)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
                     .title("Registers (x64)"),
-            ) // Add a block with title and borders
-            .column_spacing(2); // Add spacing between columns
+            )
+            .column_spacing(2);
 
         frame.render_widget(register_table, area)
     }
@@ -107,7 +140,11 @@ impl Component<Msg, AppEvent> for Registers {
                 for (k, v) in regs.iter() {
                     self.value.insert(k.clone(), *v);
                 }
-                return Some(Msg::Empty)
+                return Some(Msg::Empty);
+            }
+
+            Event::User(AppEvent::Gdb(crate::mi2command::GdbMessage::Maps(maps))) => {
+                self.memory_maps = maps;
             }
 
             _ => {}
