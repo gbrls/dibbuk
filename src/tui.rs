@@ -108,9 +108,9 @@ where
                     .margin(1)
                     .constraints(
                         [
-                            Constraint::Min(1),  // Clock
-                            Constraint::Max(60), // Letter Counter
-                            Constraint::Max(80), // Clock
+                            Constraint::Min(10),   // logs
+                            Constraint::Percentage(35), //  regs
+                            Constraint::Percentage(40), //  disasm
                         ]
                         .as_ref(),
                     )

@@ -35,7 +35,7 @@ impl MockComponent for Registers {
 
         let common_x64_registers = [
             "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp", "r8", "r9", "r10", "r11",
-            "r12", "r13", "r14", "r15", "rip", "rflags",
+            "r12", "r13", "r14", "r15", "rip", "eflags",
         ];
 
         use ratatui::widgets::{Cell, Row, Table};
@@ -63,7 +63,7 @@ impl MockComponent for Registers {
                 match (r, w, x) {
                     (true, true, true) => Style::default().bold().red(),
                     (true, true, false) => Style::default().blue(),
-                    (true, false, true) => Style::default().yellow(),
+                    (true, false, true) => Style::default().yellow().bold(),
                     (true, false, false) => Style::default().dark_gray(),
                     _ => Style::default(),
                 }
@@ -75,7 +75,7 @@ impl MockComponent for Registers {
             let mem =
                 if maybe_range.is_some() && maybe_range.unwrap().map_range.filename().is_some() {
                     format!(
-                        "{}",
+                        "{} +{:#04x}",
                         maybe_range
                             .unwrap()
                             .map_range
@@ -84,7 +84,8 @@ impl MockComponent for Registers {
                             .file_stem()
                             .unwrap()
                             .to_str()
-                            .unwrap()
+                            .unwrap(),
+                        (value as usize) - maybe_range.unwrap().map_range.start()
                     )
                 } else {
                     String::from("")
@@ -93,7 +94,7 @@ impl MockComponent for Registers {
             let cells = vec![
                 Cell::from(reg_name),
                 Cell::from(formatted_value).style(style),
-                Cell::from(mem),
+                Cell::from(mem).style(Style::default().dark_gray()),
             ];
             Row::new(cells).height(1)
         });
@@ -101,7 +102,7 @@ impl MockComponent for Registers {
         let widths = [
             Constraint::Length(8),
             Constraint::Length(20),
-            Constraint::Length(16),
+            Constraint::Length(32),
         ];
 
         let register_table = Table::new(rows, widths)

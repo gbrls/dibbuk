@@ -145,6 +145,7 @@ pub async fn run(mut data: crate::AppDataHandle) {
                     if results.contains_key("register-names") =>
                 {
                     if let MiValue::List(regs) = results.get("register-names").unwrap() {
+                        //println!("{:?}", regs);
                         let mut state = data.state.write().await;
                         for (i, r) in regs.iter().enumerate() {
                             if let MiValue::Const(s) = r {

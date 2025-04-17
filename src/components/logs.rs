@@ -108,7 +108,7 @@ impl MockComponent for Logs {
                 .unwrap_text_modifiers();
             frame.render_stateful_widget(
                 List::new(lines)
-                    .highlight_style(Style::default().reversed())
+                    .highlight_style(Style::default().white())
                     .block(Block::bordered().title("logs").border_style(match focus {
                         true => Style::new().blue(),
                         false => Style::new().dark_gray(),
@@ -172,13 +172,14 @@ impl Component<Msg, AppEvent> for Logs {
             }
             Event::Keyboard(_) => Cmd::Submit,
             Event::User(AppEvent::GdbMi(crate::parser::MiRecord::ConsoleStream(s))) => {
-                self.logs.push(format!("{}", s));
+                self.logs
+                    .push(format!("{}", s.replace("\n", "").replace("\t", " ")));
                 Cmd::Submit
             }
-            Event::User(app_event) => {
-                self.logs.push(format!("{:?}", app_event));
-                Cmd::Submit
-            }
+            //Event::User(app_event) => {
+            //    self.logs.push(format!("{:?}", app_event));
+            //    Cmd::Submit
+            //}
 
             // default
             _ => Cmd::None,
