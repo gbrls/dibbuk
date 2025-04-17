@@ -84,7 +84,7 @@ where
 impl Model<CrosstermTerminalAdapter> {
     fn new(app_data: crate::AppDataHandle) -> Self {
         Self {
-            app: Self::init_app(app_data.channels.event_tx.clone()),
+            app: Self::init_app(app_data.channels.event_tx.clone(), app_data.state.clone()),
             quit: false,
             redraw: true,
             terminal: TerminalBridge::init_crossterm().expect("Cannot initialize terminal"),
@@ -147,7 +147,11 @@ where
             })
             .is_ok());
     }
-    fn init_app(app_events_rx: broadcast::Sender<AppEvent>) -> Application<Id, Msg, AppEvent> {
+    fn init_app(
+        app_events_rx: broadcast::Sender<AppEvent>,
+        app_state_ref: std::sync::Arc<tokio::sync::RwLock<crate::AppState>>,
+    ) -> Application<Id, Msg, AppEvent> {
+        //TODO: This code needs to be refactored
         let mut app: Application<Id, Msg, AppEvent> = Application::init(
             EventListenerCfg::default()
                 .crossterm_input_listener(Duration::from_millis(20), 3)
@@ -267,9 +271,7 @@ where
                     tokio::spawn({
                         let gdb_command_tx = self.app_data_handle.channels.gdb_stdin_tx.clone();
                         async move {
-                            gdb_command_tx
-                                .send(cmd)
-                                .unwrap();
+                            gdb_command_tx.send(cmd).unwrap();
                         }
                     });
                     Some(Msg::Empty)

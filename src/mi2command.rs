@@ -28,6 +28,7 @@ pub enum GdbMessage {
     DisassemblyNative(Vec<Disassembly>),
 }
 
+//TODO: refactor with generics to handle other architectures
 #[derive(Debug)]
 pub struct GdbContext {
     pub register_name: HashMap<usize, String>,
@@ -45,6 +46,11 @@ impl GdbContext {
             register_value: HashMap::new(),
             state: GdbState::Unknown,
         }
+    }
+
+    //TODO: refactor with generics to handle other architectures
+    pub fn instruction_pointer_value(&self) -> Option<u64> {
+        self.register_value.get("rip".into()).cloned()
     }
 }
 

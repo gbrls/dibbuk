@@ -17,6 +17,7 @@ use tuirealm::{
 pub struct Disassembly {
     props: Props,
     value: HashMap<usize, mi2command::Disassembly>,
+    instruction_pointer: Option<u64>,
 }
 
 impl Default for Disassembly {
@@ -24,6 +25,7 @@ impl Default for Disassembly {
         Self {
             props: Props::default(),
             value: HashMap::new(),
+            instruction_pointer: None,
         }
     }
 }
@@ -33,45 +35,49 @@ impl MockComponent for Disassembly {
         let register_names = self.value.keys();
 
         use ratatui::widgets::{Cell, Row, Table};
-        // 2. Create header row
         let header_cells = ["Address", "Asm"]
             .iter()
-            .map(|h| Cell::from(*h).style(Style::default().bold())); // Style header
+            .map(|h| Cell::from(*h).style(Style::default().bold()));
         let header = Row::new(header_cells)
-            .style(Style::default().blue()) // Style header row background/foreground
-            .height(1) // Explicit height
-            .bottom_margin(1); // Margin below header
-                               //
+            .style(Style::default().blue())
+            .height(1)
+            .bottom_margin(1);
+
         let mut rows: Vec<_> = self.value.iter().collect();
         rows.sort_by(|(addr0, asm0), (addr1, asm1)| addr0.cmp(addr1));
 
-        // 3. Create data rows by iterating through the desired registers
+        let selected = {
+            let mut ret = None;
+            for (i, (addr, _)) in rows.iter().enumerate() {
+                if (self.instruction_pointer.unwrap_or(0) as usize) == **addr {
+                    ret = Some(i);
+                }
+            }
+            ret
+        };
+
         let rows = rows.iter().map(|(addr, disasm)| {
-            // Get the value from your context, default to 0 if not found
             let formatted_value = format!("{}", disasm.str);
             let fmt_addr = format!("{:#018x} {}+{:#05x}", addr, disasm.func, disasm.offset);
 
-            // Create cells for the row
             let cells = vec![Cell::from(fmt_addr), Cell::from(formatted_value)];
-            Row::new(cells).height(1) // Each row takes 1 line
+            Row::new(cells).height(1)
         });
 
-        // 4. Define column constraints (widths)
-        // Adjust lengths as needed for your layout and register name lengths
-        let widths = [
-            Constraint::Min(8),  // Width for register names (e.g., "rflags")
-            Constraint::Min(20), // Width for "0x" + 16 hex digits + padding
-        ];
+        let widths = [Constraint::Min(8), Constraint::Min(20)];
 
-        // 5. Create the table widget
-        let register_table = Table::new(rows, widths) // Pass rows and widths
-            .header(header) // Set the header row
-            .block(Block::default().borders(Borders::ALL).title("disassembly")) // Add a block with title and borders
+        let title = format!(
+            "disassembly {:#018x}",
+            self.instruction_pointer.unwrap_or(0)
+        );
+
+        let register_table = Table::new(rows, widths)
+            .header(header)
+            .block(Block::default().borders(Borders::ALL).title(title.as_str()))
             .column_spacing(2)
-            .row_highlight_style(Style::default().reversed()); // Add spacing between columns
+            .row_highlight_style(Style::default().reversed());
 
-        let mut table_state =
-            ratatui::widgets::TableState::default().with_selected(Some(self.value.len()));
+        let mut table_state = ratatui::widgets::TableState::default().with_selected(selected);
         frame.render_stateful_widget(register_table, area, &mut table_state)
     }
 
@@ -98,6 +104,15 @@ impl Component<Msg, AppEvent> for Disassembly {
             Event::User(AppEvent::Gdb(DisassemblyNative(asm_lines))) => {
                 for asm in asm_lines.iter() {
                     self.value.insert(asm.addr, asm.clone());
+                }
+                return Some(Msg::Empty);
+            }
+
+            Event::User(AppEvent::Gdb(crate::mi2command::GdbMessage::RegisterValue(regs))) => {
+                for (k, v) in regs.iter() {
+                    if k == "rip" {
+                        self.instruction_pointer = Some(*v);
+                    }
                 }
                 return Some(Msg::Empty);
             }

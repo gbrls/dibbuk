@@ -98,7 +98,7 @@ impl MockComponent for Logs {
                 .unwrap_text_modifiers();
             frame.render_stateful_widget(
                 List::new(lines)
-                    .highlight_style(Style::default().blue())
+                    .highlight_style(Style::default().reversed())
                     .block(Block::bordered().title("logs").border_style(match focus {
                         true => Style::new().blue(),
                         false => Style::new().dark_gray(),
