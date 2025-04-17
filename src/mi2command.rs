@@ -22,6 +22,7 @@ pub struct Disassembly {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum GdbMessage {
+    Pid(u64),
     RegisterValue(Vec<(String, u64)>),
     UpdatedRegisters(Vec<usize>),
     StateUpdate(GdbState),
@@ -258,6 +259,44 @@ pub async fn run(mut data: crate::AppDataHandle) {
                             .unwrap();
                     }
                 }
+
+                Some(MiRecord::Result(ResultRecord { results, .. }))
+                    if results.contains_key("threads") =>
+                {
+                    let threads = results.get("threads").unwrap();
+                    if let MiValue::List(tuple_list) = threads {
+                        for tpl in tuple_list {
+                            if let MiValue::Tuple(tpl) = tpl {
+                                for (k, v) in tpl {
+                                    match (k, v) {
+                                        (_, MiValue::Const(v)) if k == "target-id" => {
+                                            let re = regex::Regex::new(r".* (\d+)")
+                                                .expect("Invalid Regex pattern");
+                                            if let Some(caps) = re.captures(v) {
+                                                let pid_str = caps.iter().last();
+                                                if let Some(Some(pid_str)) = pid_str {
+                                                    let pid = pid_str.as_str().parse::<u64>();
+                                                    if let Ok(pid) = pid {
+                                                        data.channels
+                                                            .event_tx
+                                                            .send(Gdb(Pid(pid)))
+                                                            .unwrap();
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Some(mi) => {
+                    data.channels.event_tx.send(GdbMi(mi)).unwrap();
+                }
+
                 _ => {}
             }
         }

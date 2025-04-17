@@ -71,7 +71,17 @@ impl MockComponent for Logs {
         // Check if visible
         if self.props.get_or(Attribute::Display, AttrValue::Flag(true)) == AttrValue::Flag(true) {
             // Get properties
-            let lines = self.logs.iter().map(|l| ListItem::new(l.as_str()));
+            let lines = self.logs.iter().map(|l| {
+                let style = if l.starts_with("GdbMi") {
+                    Style::default().dark_gray()
+                } else if l.starts_with("Gdb") {
+                    Style::default()
+                } else {
+                    Style::default().blue()
+                };
+                //let style = Style::default();
+                ListItem::new(l.as_str()).style(style)
+            });
             let focus = self
                 .props
                 .get_or(Attribute::Focus, AttrValue::Flag(true))
@@ -161,6 +171,10 @@ impl Component<Msg, AppEvent> for Logs {
                 return Some(Msg::ShowHelp);
             }
             Event::Keyboard(_) => Cmd::Submit,
+            Event::User(AppEvent::GdbMi(crate::parser::MiRecord::ConsoleStream(s))) => {
+                self.logs.push(format!("{}", s));
+                Cmd::Submit
+            }
             Event::User(app_event) => {
                 self.logs.push(format!("{:?}", app_event));
                 Cmd::Submit

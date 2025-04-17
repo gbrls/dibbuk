@@ -1,4 +1,5 @@
 // -thread-info -> pid -> /proc/pid/maps
+use proc_maps::get_process_maps;
 
 pub async fn run(mut data: crate::AppDataHandle) {
     use crate::mi2command::GdbMessage::*;
@@ -20,6 +21,10 @@ pub async fn run(mut data: crate::AppDataHandle) {
                         .gdb_stdin_tx
                         .send(GetRegisterValues(ids))
                         .unwrap();
+                }
+                Gdb(Pid(pid)) => {
+                    let maps = get_process_maps(pid as i32);
+                    //println!("{:?}", maps)
                 }
                 _ => {}
             }

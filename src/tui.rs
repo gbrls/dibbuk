@@ -230,8 +230,8 @@ where
 
         // active!
         //assert!(app.active(&Id::Help).is_ok());
-        assert!(app.active(&Id::Logs).is_ok());
-        //assert!(app.active(&Id::GDbUserInput).is_ok());
+        //assert!(app.active(&Id::Logs).is_ok());
+        assert!(app.active(&Id::GDbUserInput).is_ok());
         app
     }
 }
@@ -307,7 +307,7 @@ impl Poll<AppEvent> for BroadcastPoller {
             Ok(user_event) => Ok(Some(Event::User(user_event))),
             Err(broadcast::error::TryRecvError::Empty) => Ok(None),
             Err(broadcast::error::TryRecvError::Lagged(count)) => {
-                eprintln!("WARN: Broadcast receiver lagged by {} messages.", count);
+                //eprintln!("WARN: Broadcast receiver lagged by {} messages.", count);
                 Ok(None)
             }
             Err(broadcast::error::TryRecvError::Closed) => Ok(None),

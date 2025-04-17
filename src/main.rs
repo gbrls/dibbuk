@@ -154,8 +154,9 @@ async fn main() {
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;
             let start_cmds = vec![
                 process::StdinCommand::AddBreakpoint("main".into()),
-                process::StdinCommand::AddBreakpoint("set disassembly-flavor intel".into()),
+                process::StdinCommand::Input("set disassembly-flavor intel".into()),
                 process::StdinCommand::Run,
+                process::StdinCommand::Input("-thread-info".into()),
                 process::StdinCommand::GetRegisterNames,
             ];
 
