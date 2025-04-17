@@ -96,12 +96,15 @@ impl MockComponent for Logs {
                     AttrValue::TextModifiers(TextModifiers::empty()),
                 )
                 .unwrap_text_modifiers();
-            frame.render_widget(
-                List::new(lines).block(Block::bordered().title("logs").border_style(match focus {
-                    true => Style::new().blue(),
-                    false => Style::new().dark_gray(),
-                })),
+            frame.render_stateful_widget(
+                List::new(lines)
+                    .highlight_style(Style::default().blue())
+                    .block(Block::bordered().title("logs").border_style(match focus {
+                        true => Style::new().blue(),
+                        false => Style::new().dark_gray(),
+                    })),
                 area,
+                &mut ratatui::widgets::ListState::default().with_selected(Some(self.logs.len())),
             );
         }
     }

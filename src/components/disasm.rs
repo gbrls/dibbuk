@@ -41,9 +41,12 @@ impl MockComponent for Disassembly {
             .style(Style::default().blue()) // Style header row background/foreground
             .height(1) // Explicit height
             .bottom_margin(1); // Margin below header
+                               //
+        let mut rows: Vec<_> = self.value.iter().collect();
+        rows.sort_by(|(addr0, asm0), (addr1, asm1)| addr0.cmp(addr1));
 
         // 3. Create data rows by iterating through the desired registers
-        let rows = self.value.iter().map(|(addr, disasm)| {
+        let rows = rows.iter().map(|(addr, disasm)| {
             // Get the value from your context, default to 0 if not found
             let formatted_value = format!("{}", disasm.str);
             let fmt_addr = format!("{:#018x} {}+{:#05x}", addr, disasm.func, disasm.offset);
@@ -56,17 +59,20 @@ impl MockComponent for Disassembly {
         // 4. Define column constraints (widths)
         // Adjust lengths as needed for your layout and register name lengths
         let widths = [
-            Constraint::Min(8), // Width for register names (e.g., "rflags")
-            Constraint::Min(20),   // Width for "0x" + 16 hex digits + padding
+            Constraint::Min(8),  // Width for register names (e.g., "rflags")
+            Constraint::Min(20), // Width for "0x" + 16 hex digits + padding
         ];
 
         // 5. Create the table widget
         let register_table = Table::new(rows, widths) // Pass rows and widths
             .header(header) // Set the header row
             .block(Block::default().borders(Borders::ALL).title("disassembly")) // Add a block with title and borders
-            .column_spacing(2); // Add spacing between columns
+            .column_spacing(2)
+            .row_highlight_style(Style::default().reversed()); // Add spacing between columns
 
-        frame.render_widget(register_table, area)
+        let mut table_state =
+            ratatui::widgets::TableState::default().with_selected(Some(self.value.len()));
+        frame.render_stateful_widget(register_table, area, &mut table_state)
     }
 
     fn query(&self, attr: Attribute) -> Option<AttrValue> {

@@ -62,7 +62,7 @@ pub enum Msg {
     Log,
     ShowHelp,
     HideHelp,
-    GdbInput(String),
+    GdbInput(process::StdinCommand),
 }
 
 pub struct Model<T>
@@ -120,7 +120,7 @@ where
                     .direction(Direction::Vertical)
                     .constraints(
                         [
-                            Constraint::Max(8), // Clock
+                            Constraint::Max(4), // Clock
                             Constraint::Min(1), // Clock
                         ]
                         .as_ref(),
@@ -247,7 +247,10 @@ where
                     None
                 }
                 Msg::Empty => None,
-                Msg::Log => None,
+                Msg::Log => {
+                    //println!("log!!!!!!!");
+                    None
+                }
                 Msg::ShowHelp => {
                     assert!(self.app.active(&Id::Help).is_ok());
                     self.ui_state = UiState::Help;
@@ -261,15 +264,16 @@ where
                 }
 
                 Msg::GdbInput(cmd) => {
+                    println!("input!!!!!!!");
                     tokio::spawn({
                         let gdb_command_tx = self.app_data_handle.channels.gdb_stdin_tx.clone();
                         async move {
                             gdb_command_tx
-                                .send(process::StdinCommand::Input(cmd))
+                                .send(cmd)
                                 .unwrap();
                         }
                     });
-                    None
+                    Some(Msg::Empty)
                 }
             }
         } else {
@@ -340,6 +344,7 @@ fn blocking_start(app_data: crate::AppDataHandle) {
             }
             _ => {}
         }
+
         // Redraw
         if model.redraw {
             model.view();

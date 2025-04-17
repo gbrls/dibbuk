@@ -33,7 +33,7 @@ pub struct GdbIo {
     pub child_process: Child,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum StdinCommand {
     AddBreakpoint(String),
     Input(String),
@@ -147,7 +147,7 @@ pub async fn run_event_loop(
                 }
                 Ok(_) => {
                     // Print directly to the user's terminal stdout
-                    //println!("{}", line_buf);
+                    //println!("received gdb command!!!!! {}", line_buf);
                     //println!("{:?}", crate::parser::parse_mi_line(&line_buf));
                     stdout_tx
                         .send(MiOutput {
@@ -251,6 +251,7 @@ async fn gdb_commands_loop(mut gdb_stdin: ChildStdin, mut cmd_rx: UnboundedRecei
         let mut cmd_ascii = match cmd {
             AddBreakpoint(loc) => format!("-break-insert {}", loc),
             Run => "-exec-run".into(),
+            StepInstruction => "-exec-step-instruction".into(),
             GetRegisterNames => "-data-list-register-names".into(),
             GetAllRegisterValues => "-data-list-register-values x".into(),
             GetRegisterValues(ids) => {
@@ -269,6 +270,7 @@ async fn gdb_commands_loop(mut gdb_stdin: ChildStdin, mut cmd_rx: UnboundedRecei
             _ => todo!("ops..."),
         };
         cmd_ascii.push('\n');
+        //cmd_ascii.push('\n');
         gdb_stdin
             .write_all(cmd_ascii.as_bytes())
             .await

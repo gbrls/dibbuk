@@ -9,9 +9,10 @@ mod tui;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 
-#[derive(Debug, Clone, PartialOrd, Eq, Ord)]
+#[derive(Debug, Clone, Eq)]
 pub enum AppEvent {
     Gdb(mi2command::GdbMessage),
+    GdbMi(parser::MiRecord),
     Any,
 }
 
@@ -20,9 +21,16 @@ impl PartialEq for AppEvent {
         match (self, other) {
             (AppEvent::Any, _) => true,
             (_, AppEvent::Any) => true,
-
             (AppEvent::Gdb(gdb_self), AppEvent::Gdb(gdb_other)) => gdb_self == gdb_other,
+            (AppEvent::GdbMi(a), AppEvent::GdbMi(b)) => a == b,
+            (_, _) => false,
         }
+    }
+}
+
+impl PartialOrd for AppEvent {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        None
     }
 }
 
@@ -75,8 +83,8 @@ struct App {
 impl App {
     fn new() -> (Self, mpsc::UnboundedReceiver<process::StdinCommand>) {
         let (gdb_stdin_tx, gdb_stdin_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (gdb_mi_tx, _) = tokio::sync::broadcast::channel(16);
-        let (event_tx, _) = tokio::sync::broadcast::channel(16);
+        let (gdb_mi_tx, _) = tokio::sync::broadcast::channel(64);
+        let (event_tx, _) = tokio::sync::broadcast::channel(64);
         let state = std::sync::Arc::new(tokio::sync::RwLock::new(AppState {
             gdb_ctx: mi2command::GdbContext::new(),
         }));
@@ -114,6 +122,7 @@ async fn main() {
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;
             let start_cmds = vec![
                 process::StdinCommand::AddBreakpoint("main".into()),
+                process::StdinCommand::AddBreakpoint("set disassembly-flavor intel".into()),
                 process::StdinCommand::Run,
                 process::StdinCommand::GetRegisterNames,
             ];

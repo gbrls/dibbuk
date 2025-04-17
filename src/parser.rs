@@ -21,7 +21,7 @@ use std::collections::HashMap;
 // --- Type Definitions (Merged into this file as per user request) ---
 
 /// Represents a fully parsed GDB MI Record (Output Line).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MiRecord {
     Result(ResultRecord),
     ExecAsync(AsyncRecord),
@@ -34,7 +34,7 @@ pub enum MiRecord {
     Unknown(String),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResultRecord {
     pub token: Option<u64>,
     pub class: String,
@@ -42,7 +42,7 @@ pub struct ResultRecord {
     pub results: HashMap<String, MiValue>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AsyncRecord {
     pub token: Option<u64>,
     pub kind: AsyncKind,
@@ -58,7 +58,7 @@ pub enum AsyncKind {
     Notify,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MiValue {
     /// A constant string (`"content"`). Content is unescaped.
     Const(String),
@@ -822,5 +822,3 @@ mod tests {
         println!("{:?}", r);
     }
 }
-
-

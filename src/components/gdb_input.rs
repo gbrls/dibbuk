@@ -146,6 +146,11 @@ impl Component<Msg, AppEvent> for GdbInput {
     fn on(&mut self, e: Event<AppEvent>) -> Option<Msg> {
         match e {
             Event::Keyboard(KeyEvent {
+                code: Key::Esc,
+                modifiers: KeyModifiers::NONE,
+                ..
+            }) => return Some(Msg::Quit),
+            Event::Keyboard(KeyEvent {
                 code: event::Key::Enter,
                 modifiers: KeyModifiers::NONE,
             }) => {
@@ -155,7 +160,7 @@ impl Component<Msg, AppEvent> for GdbInput {
                 } else {
                     self.messages.push(String::new());
                 }
-                Some(Msg::GdbInput(cmd))
+                Some(Msg::GdbInput(crate::process::StdinCommand::Input(cmd)))
             }
 
             Event::Keyboard(KeyEvent {

@@ -56,12 +56,20 @@ pub async fn run(mut data: crate::AppDataHandle) {
             use crate::parser::MiRecord;
             use crate::parser::MiValue;
             use crate::parser::ResultRecord;
-            use crate::AppEvent::Gdb;
+            use crate::AppEvent::*;
             use GdbMessage::*;
 
             // [mi] ExecAsync(AsyncRecord { token: None, kind: Exec, class: "stopped", results: {"frame": Tuple([("addr", Const("0x00005555555555d5")), ("func", Const("main")), ("args", List([])), ("arch", Const("i386:x86-64"))]), "thread-id": Const("1"), "reason": Const("end-stepping-range"), "core": Const("12"), "stopped-threads": Const("all")} })
             //
             // [mi] ExecAsync(AsyncRecord { token: None, kind: Exec, class: "stopped", results: {"thread-id": Const("1"), "stopped-threads": Const("all"), "frame": Tuple([("addr", Const("0x00005555555555d3")), ("func", Const("main")), ("args", List([])), ("arch", Const("i386:x86-64"))]), "core": Const("12"), "reason": Const("end-stepping-range")} })
+
+            // always send raw mi commands first
+            //if cmd.mi.is_some() {
+            //    data.channels
+            //        .event_tx
+            //        .send(GdbMi(cmd.mi.clone().unwrap()))
+            //        .unwrap();
+            //}
 
             match cmd.mi {
                 None => {}
