@@ -149,6 +149,11 @@ impl Component<Msg, AppEvent> for Logs {
             }) => return Some(Msg::Quit),
 
             Event::Keyboard(KeyEvent {
+                code: Key::Enter,
+                modifiers: KeyModifiers::NONE,
+            }) => return Some(Msg::GdbInput(crate::process::StdinCommand::StepInstruction)),
+
+            Event::Keyboard(KeyEvent {
                 code: Key::Char('?'),
                 modifiers: KeyModifiers::NONE,
             }) => {

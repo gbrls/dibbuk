@@ -226,8 +226,8 @@ where
 
         // active!
         //assert!(app.active(&Id::Help).is_ok());
-        //assert!(app.active(&Id::Logs).is_ok());
-        assert!(app.active(&Id::GDbUserInput).is_ok());
+        assert!(app.active(&Id::Logs).is_ok());
+        //assert!(app.active(&Id::GDbUserInput).is_ok());
         app
     }
 }
@@ -264,7 +264,6 @@ where
                 }
 
                 Msg::GdbInput(cmd) => {
-                    println!("input!!!!!!!");
                     tokio::spawn({
                         let gdb_command_tx = self.app_data_handle.channels.gdb_stdin_tx.clone();
                         async move {

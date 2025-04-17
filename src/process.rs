@@ -60,10 +60,18 @@ pub struct MiOutput {
 }
 
 /// Spawns a GDB process configured for MI interaction. (Same as before)
-pub async fn spawn_gdb_process(gdb_path: &str) -> Result<GdbIo, GdbProcessError> {
+pub async fn spawn_gdb_process(
+    gdb_path: &str,
+    cli_args: &crate::CliArgs,
+) -> Result<GdbIo, GdbProcessError> {
     let mut cmd = Command::new(gdb_path);
     cmd.arg("--interpreter=mi3")
-        .arg("/home/gbrls/ctf/2025/dice/r2uwu2s-resort/resort")
+        .arg(
+            cli_args
+                .file
+                .clone()
+                .unwrap_or("/home/gbrls/ctf/2025/dice/r2uwu2s-resort/resort".into()),
+        )
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -107,9 +115,16 @@ pub async fn spawn_gdb_process(gdb_path: &str) -> Result<GdbIo, GdbProcessError>
 pub async fn run_event_loop(
     cmd_rx: UnboundedReceiver<StdinCommand>,
     stdout_tx: tokio::sync::broadcast::Sender<MiOutput>,
+    app_data: crate::AppDataHandle,
 ) {
     println!("[Proxy Setup] Attempting to spawn GDB...");
-    let gdb_io_result = spawn_gdb_process("gdb").await;
+
+    let cli_args = {
+        let handle = app_data.state.read().await;
+        handle.cli_args.clone()
+    };
+
+    let gdb_io_result = spawn_gdb_process("gdb", &cli_args).await;
 
     let mut gdb_io = match gdb_io_result {
         Ok(io) => io,

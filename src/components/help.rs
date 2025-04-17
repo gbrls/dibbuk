@@ -119,8 +119,7 @@ impl MockComponent for Help {
                         .border_style(match focus {
                             true => Style::new().blue(),
                             false => Style::new().dark_gray(),
-                        })
-                        .bg(Color::Black),
+                        }), //.bg(Style::default().blue()),
                 ),
                 Help::centered_rect(frame.area(), 40, 40),
             );

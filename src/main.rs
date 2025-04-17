@@ -6,12 +6,40 @@ mod parser;
 mod process;
 mod tui;
 
+use mi2command::GdbContext;
+use mi2command::GdbMessage;
+
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 
+use clap::{Parser, Subcommand};
+use std::path::PathBuf;
+
+use clap::builder::styling;
+use clap::builder::Styles;
+
+fn my_styles() -> Styles {
+    styling::Styles::styled()
+        .header(styling::AnsiColor::Green.on_default() | styling::Effects::BOLD)
+        .usage(styling::AnsiColor::Green.on_default() | styling::Effects::BOLD)
+        .literal(styling::AnsiColor::Blue.on_default() | styling::Effects::BOLD)
+        .placeholder(styling::AnsiColor::Cyan.on_default())
+}
+
+#[derive(Parser, Debug, Clone)]
+#[command(styles(my_styles()))]
+pub struct CliArgs {
+    /// ELF File to be debugged
+    #[arg(short, long)]
+    file: Option<PathBuf>,
+    /// Turn debugging information on
+    #[arg(short, long, action = clap::ArgAction::Count)]
+    debug: u8,
+}
+
 #[derive(Debug, Clone, Eq)]
 pub enum AppEvent {
-    Gdb(mi2command::GdbMessage),
+    Gdb(GdbMessage),
     GdbMi(parser::MiRecord),
     Any,
 }
@@ -36,7 +64,8 @@ impl PartialOrd for AppEvent {
 
 #[derive(Debug)]
 pub struct AppState {
-    pub gdb_ctx: mi2command::GdbContext,
+    pub gdb_ctx: GdbContext,
+    pub cli_args: CliArgs,
 }
 
 #[derive(Debug)]
@@ -81,12 +110,13 @@ struct App {
 }
 
 impl App {
-    fn new() -> (Self, mpsc::UnboundedReceiver<process::StdinCommand>) {
+    fn new(cli: &CliArgs) -> (Self, mpsc::UnboundedReceiver<process::StdinCommand>) {
         let (gdb_stdin_tx, gdb_stdin_rx) = tokio::sync::mpsc::unbounded_channel();
         let (gdb_mi_tx, _) = tokio::sync::broadcast::channel(64);
         let (event_tx, _) = tokio::sync::broadcast::channel(64);
         let state = std::sync::Arc::new(tokio::sync::RwLock::new(AppState {
-            gdb_ctx: mi2command::GdbContext::new(),
+            gdb_ctx: GdbContext::new(),
+            cli_args: cli.clone(),
         }));
 
         (
@@ -113,7 +143,9 @@ impl App {
 
 #[tokio::main]
 async fn main() {
-    let (app, gdb_stdin_rx) = App::new();
+    let cli = CliArgs::parse();
+
+    let (app, gdb_stdin_rx) = App::new(&cli);
 
     // initial commands to gdb
     tokio::spawn({
@@ -133,7 +165,11 @@ async fn main() {
         }
     });
 
-    let gdb_handle = tokio::spawn(process::run_event_loop(gdb_stdin_rx, app.gdb_mi_tx.clone()));
+    let gdb_handle = tokio::spawn(process::run_event_loop(
+        gdb_stdin_rx,
+        app.gdb_mi_tx.clone(),
+        app.data_handle(),
+    ));
     let app_handle = tokio::spawn(mi2command::run(app.data_handle()));
     let tui_handle = tokio::spawn(tui::run(app.data_handle()));
     let mgr_handle = tokio::spawn(manager::run(app.data_handle()));
