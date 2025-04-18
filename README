@@ -1,0 +1,10 @@
+dbk: dibbuk, a tui for gdb
+
+
+- default layouts
+- modal input 
+- vim keybindings
+- press ? for help
+
+- known bugs:
+    - gdb user input is shifted by one
