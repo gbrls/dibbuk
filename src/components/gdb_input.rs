@@ -160,7 +160,6 @@ impl Component<Msg, AppEvent> for GdbInput {
             }) => help_keymap.get(&key).cloned(),
             _ => None,
         })
-        .or(crate::tui::keymap(&e))
         .or_else(|| match e {
             Event::Keyboard(KeyEvent {
                 code: event::Key::Enter,
@@ -192,5 +191,6 @@ impl Component<Msg, AppEvent> for GdbInput {
 
             _ => None,
         })
+        .or(crate::tui::keymap(&e))
     }
 }

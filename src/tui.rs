@@ -90,9 +90,10 @@ where
 pub fn keymap(event: &Event<AppEvent>) -> Option<Msg> {
     use std::collections::HashMap;
     use tuirealm::event::{Key, KeyEvent, KeyModifiers};
-    let common_keymap: HashMap<Key, Msg> = [(Key::Char('?'), Msg::ShowHelp), (Key::Esc, Msg::Quit)]
-        .into_iter()
-        .collect();
+    let common_keymap: HashMap<Key, Msg> =
+        [(Key::Char('?'), Msg::ShowHelp), (Key::Char('q'), Msg::Quit)]
+            .into_iter()
+            .collect();
     //let modal_keymaps: HashMap<InputMode, HashMap<Key, Msg>> = [(
     //    InputMode::Normal,
     //    [(Key::Char('i'), Msg::ChangeToMode(InputMode::Insert))],
