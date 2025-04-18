@@ -43,6 +43,12 @@ pub enum UiState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InputMode {
+    Insert,
+    Normal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Id {
     Logs,
     Help,
@@ -62,6 +68,8 @@ pub enum Msg {
     Log,
     ShowHelp,
     HideHelp,
+    NextView,
+    ChangeToMode(InputMode),
     GdbInput(process::StdinCommand),
 }
 
@@ -69,16 +77,46 @@ pub struct Model<T>
 where
     T: TerminalAdapter,
 {
-    /// Application
     pub app: Application<Id, Msg, AppEvent>,
-    /// Indicates that the application must quit
     pub quit: bool,
-    /// Tells whether to redraw interface
     pub redraw: bool,
-    /// Used to draw to terminal
     pub terminal: TerminalBridge<T>,
     pub app_data_handle: crate::AppDataHandle,
     pub ui_state: UiState,
+    /// Modal debugger!
+    pub input_mode: InputMode,
+}
+
+pub fn keymap(event: &Event<AppEvent>) -> Option<Msg> {
+    use std::collections::HashMap;
+    use tuirealm::event::{Key, KeyEvent, KeyModifiers};
+    let common_keymap: HashMap<Key, Msg> = [(Key::Char('?'), Msg::ShowHelp), (Key::Esc, Msg::Quit)]
+        .into_iter()
+        .collect();
+    //let modal_keymaps: HashMap<InputMode, HashMap<Key, Msg>> = [(
+    //    InputMode::Normal,
+    //    [(Key::Char('i'), Msg::ChangeToMode(InputMode::Insert))],
+    //)]
+    //.into_iter()
+    //.map(|(mode, maps)| (mode, maps.into_iter().collect()))
+    //.collect();
+
+    match event {
+        Event::Keyboard(KeyEvent {
+            code: key,
+            modifiers: KeyModifiers::NONE,
+            ..
+        }) => common_keymap.get(&key).cloned(),
+
+        _ => None,
+    }
+}
+
+pub fn border_config(focused: bool) -> Style {
+    match focused {
+        true => Style::new().blue(),
+        false => Style::new().dark_gray(),
+    }
 }
 
 impl Model<CrosstermTerminalAdapter> {
@@ -90,6 +128,7 @@ impl Model<CrosstermTerminalAdapter> {
             terminal: TerminalBridge::init_crossterm().expect("Cannot initialize terminal"),
             app_data_handle: app_data,
             ui_state: UiState::Default,
+            input_mode: InputMode::Normal,
         }
     }
 }
@@ -103,45 +142,60 @@ where
         assert!(self
             .terminal
             .draw(|f| {
-                let chunks = Layout::default()
+                let horizontal_chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .margin(1)
+                    .constraints(
+                        [
+                            Constraint::Percentage(98), // logs
+                            Constraint::Max(4),         //  statusbar
+                        ]
+                        .as_ref(),
+                    )
+                    .split(f.area());
+                let vertical_chunks = Layout::default()
                     .direction(Direction::Horizontal)
                     .margin(1)
                     .constraints(
                         [
-                            Constraint::Min(10),   // logs
+                            Constraint::Min(10),        // left
                             Constraint::Percentage(35), //  regs
                             Constraint::Percentage(40), //  disasm
                         ]
                         .as_ref(),
                     )
-                    .split(f.area());
+                    .split(horizontal_chunks[0]);
 
-                let left_chunks = Layout::default()
+                let left_subchunks = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints(
                         [
-                            Constraint::Max(4), // Clock
-                            Constraint::Min(1), // Clock
+                            Constraint::Max(3), // gdbinput
+                            Constraint::Min(1), // logs
                         ]
                         .as_ref(),
                     )
-                    .split(chunks[0]);
+                    .split(vertical_chunks[0]);
 
                 match self.ui_state {
                     UiState::Default => {
-                        self.app.view(&Id::Logs, f, left_chunks[1]);
-                        self.app.view(&Id::GDbUserInput, f, left_chunks[0]);
-                        self.app.view(&Id::Registers, f, chunks[1]);
-                        self.app.view(&Id::Disassembly, f, chunks[2]);
+                        self.app.view(&Id::Logs, f, left_subchunks[1]);
+                        self.app.view(&Id::GDbUserInput, f, left_subchunks[0]);
+                        self.app.view(&Id::Registers, f, vertical_chunks[1]);
+                        self.app.view(&Id::Disassembly, f, vertical_chunks[2]);
+                        f.render_widget(
+                            Paragraph::new(format!("{:?}", self.input_mode)),
+                            horizontal_chunks[1],
+                        );
                         //self.app.view(&Id::Help, f, chunks[0]);
                     }
 
                     UiState::Help => {
-                        self.app.view(&Id::Logs, f, left_chunks[1]);
-                        self.app.view(&Id::GDbUserInput, f, left_chunks[0]);
-                        self.app.view(&Id::Registers, f, chunks[1]);
-                        self.app.view(&Id::Disassembly, f, chunks[2]);
-                        self.app.view(&Id::Help, f, chunks[0]);
+                        self.app.view(&Id::Logs, f, left_subchunks[1]);
+                        self.app.view(&Id::GDbUserInput, f, left_subchunks[0]);
+                        self.app.view(&Id::Registers, f, vertical_chunks[1]);
+                        self.app.view(&Id::Disassembly, f, vertical_chunks[2]);
+                        self.app.view(&Id::Help, f, vertical_chunks[0]);
                     }
                 }
             })
@@ -230,8 +284,8 @@ where
 
         // active!
         //assert!(app.active(&Id::Help).is_ok());
-        //assert!(app.active(&Id::Logs).is_ok());
-        assert!(app.active(&Id::GDbUserInput).is_ok());
+        assert!(app.active(&Id::Logs).is_ok());
+        //assert!(app.active(&Id::GDbUserInput).is_ok());
         app
     }
 }
@@ -250,11 +304,19 @@ where
                     self.quit = true;
                     None
                 }
-                Msg::Empty => None,
-                Msg::Log => {
-                    //println!("log!!!!!!!");
+                Msg::ChangeToMode(InputMode::Insert) => {
+                    assert!(self.app.active(&Id::GDbUserInput).is_ok());
+                    self.input_mode = InputMode::Insert;
                     None
                 }
+                Msg::ChangeToMode(InputMode::Normal) => {
+                    assert!(self.app.active(&Id::Logs).is_ok());
+                    self.input_mode = InputMode::Normal;
+                    None
+                }
+                Msg::NextView => None,
+                Msg::Empty => None,
+                Msg::Log => None,
                 Msg::ShowHelp => {
                     assert!(self.app.active(&Id::Help).is_ok());
                     self.ui_state = UiState::Help;
@@ -274,7 +336,8 @@ where
                             gdb_command_tx.send(cmd).unwrap();
                         }
                     });
-                    Some(Msg::Empty)
+                    None
+                    //Some(Msg::Empty)
                 }
             }
         } else {

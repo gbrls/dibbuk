@@ -16,14 +16,21 @@ use tuirealm::MockComponent;
 use tuirealm::props::{Alignment, TextModifiers};
 use tuirealm::{Component, Event, Props, State, StateValue};
 
+enum HelpView {
+    Default,
+    Extra,
+}
+
 pub struct Help {
     props: Props,
+    state: HelpView,
 }
 
 impl Default for Help {
     fn default() -> Self {
         Self {
             props: Props::default(),
+            state: HelpView::Default,
         }
     }
 }
@@ -34,26 +41,6 @@ impl Help {
         S: AsRef<str>,
     {
         self.attr(Attribute::Text, AttrValue::String(s.as_ref().to_string()));
-        self
-    }
-
-    pub fn alignment(mut self, a: Alignment) -> Self {
-        self.attr(Attribute::TextAlign, AttrValue::Alignment(a));
-        self
-    }
-
-    pub fn foreground(mut self, c: Color) -> Self {
-        self.attr(Attribute::Foreground, AttrValue::Color(c));
-        self
-    }
-
-    pub fn background(mut self, c: Color) -> Self {
-        self.attr(Attribute::Background, AttrValue::Color(c));
-        self
-    }
-
-    pub fn modifiers(mut self, m: TextModifiers) -> Self {
-        self.attr(Attribute::TextProps, AttrValue::TextModifiers(m));
         self
     }
 
@@ -80,37 +67,18 @@ impl Help {
 
 impl MockComponent for Help {
     fn view(&mut self, frame: &mut Frame, area: Rect) {
-        // Check if visible
         if self.props.get_or(Attribute::Display, AttrValue::Flag(true)) == AttrValue::Flag(true) {
-            // Get properties
             let focus = self
                 .props
                 .get_or(Attribute::Focus, AttrValue::Flag(true))
                 .unwrap_flag();
-            //println!("{:?}", text);
-            let alignment = self
-                .props
-                .get_or(Attribute::TextAlign, AttrValue::Alignment(Alignment::Left))
-                .unwrap_alignment();
-            let foreground = self
-                .props
-                .get_or(Attribute::Foreground, AttrValue::Color(Color::Reset))
-                .unwrap_color();
-            let background = self
-                .props
-                .get_or(Attribute::Background, AttrValue::Color(Color::Reset))
-                .unwrap_color();
-            let modifiers = self
-                .props
-                .get_or(
-                    Attribute::TextProps,
-                    AttrValue::TextModifiers(TextModifiers::empty()),
-                )
-                .unwrap_text_modifiers();
             frame.render_widget(
-                Paragraph::new(
-                    "global: ? for help, Esc to exit\nlogs: kj to up and down, / for search",
-                )
+                Paragraph::new(match self.state {
+                    HelpView::Extra => "extra tips!",
+                    HelpView::Default => {
+                        "global: ? for help, Esc to exit\nlogs: kj to up and down, / for search"
+                    }
+                })
                 .block(
                     Block::bordered()
                         .title("help - press any key to exit")
@@ -147,9 +115,22 @@ impl MockComponent for Help {
 
 impl Component<Msg, AppEvent> for Help {
     fn on(&mut self, e: Event<AppEvent>) -> Option<Msg> {
+        use tuirealm::event::Key;
         match e {
+            Event::Keyboard(KeyEvent {
+                code: Key::Tab,
+                modifiers: KeyModifiers::NONE,
+            }) => {
+                self.state = match self.state {
+                    HelpView::Default => HelpView::Extra,
+                    HelpView::Extra => HelpView::Default,
+                };
+                Some(Msg::Empty)
+            }
+            Event::FocusLost => Some(Msg::HideHelp),
             Event::Keyboard(KeyEvent { .. }) => Some(Msg::HideHelp),
             _ => None,
         }
+        .or(crate::tui::keymap(&e))
     }
 }

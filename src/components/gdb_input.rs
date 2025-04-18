@@ -1,4 +1,5 @@
 use crate::tui::Msg;
+use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 use tuirealm::command::{Cmd, CmdResult};
 use tuirealm::event::{Key, KeyEvent, KeyModifiers};
@@ -88,7 +89,7 @@ impl MockComponent for GdbInput {
         if self.props.get_or(Attribute::Display, AttrValue::Flag(true)) == AttrValue::Flag(true) {
             let dstr = String::from("???");
             let text = self.messages.last().unwrap_or(&dstr);
-            let text = format!("{}\n{:?}", text, self.messages);
+            let text = format!("{}", text);
 
             // Get properties
             let focus = self
@@ -115,9 +116,11 @@ impl MockComponent for GdbInput {
                 )
                 .unwrap_text_modifiers();
             frame.render_widget(
-                Paragraph::new(text.as_str())
-                    .style(Color::Yellow)
-                    .block(Block::bordered().title("input")),
+                Paragraph::new(text.as_str()).style(Color::Yellow).block(
+                    Block::bordered()
+                        .title("input")
+                        .border_style(crate::tui::border_config(focus)),
+                ),
                 area,
             );
         }
@@ -144,12 +147,21 @@ impl MockComponent for GdbInput {
 
 impl Component<Msg, AppEvent> for GdbInput {
     fn on(&mut self, e: Event<AppEvent>) -> Option<Msg> {
-        match e {
+        let help_keymap: HashMap<Key, Msg> =
+            [(Key::Esc, Msg::ChangeToMode(crate::tui::InputMode::Normal))]
+                .into_iter()
+                .collect();
+
+        //crate::tui::keymap(&e)
+        (match e {
             Event::Keyboard(KeyEvent {
-                code: Key::Esc,
+                code: key,
                 modifiers: KeyModifiers::NONE,
-                ..
-            }) => return Some(Msg::Quit),
+            }) => help_keymap.get(&key).cloned(),
+            _ => None,
+        })
+        .or(crate::tui::keymap(&e))
+        .or_else(|| match e {
             Event::Keyboard(KeyEvent {
                 code: event::Key::Enter,
                 modifiers: KeyModifiers::NONE,
@@ -179,6 +191,6 @@ impl Component<Msg, AppEvent> for GdbInput {
             }
 
             _ => None,
-        }
+        })
     }
 }

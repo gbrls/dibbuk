@@ -1,6 +1,7 @@
 // src/tui.rs
 
 use crate::tui::Msg;
+use std::collections::HashMap;
 
 use std::time::{Duration, SystemTime};
 use tuirealm::command::{Cmd, CmdResult};
@@ -16,15 +17,25 @@ use tuirealm::{
     Application, AttrValue, Attribute, EventListenerCfg, Sub, SubClause, SubEventClause, Update,
 };
 
+use crate::parser::MiRecord;
+use crate::process::StdinCommand;
+use crate::tui::keymap;
 use crate::AppEvent;
 use tuirealm::MockComponent;
 
 use tuirealm::props::{Alignment, TextModifiers};
 use tuirealm::{Component, Event, Props, State, StateValue};
 
+#[derive(Debug)]
+enum LogsView {
+    JustConsole,
+    Verbose,
+}
+
 pub struct Logs {
     props: Props,
     logs: Vec<String>,
+    view_state: LogsView,
 }
 
 impl Default for Logs {
@@ -32,6 +43,7 @@ impl Default for Logs {
         Self {
             props: Props::default(),
             logs: Vec::new(),
+            view_state: LogsView::JustConsole,
         }
     }
 }
@@ -109,10 +121,11 @@ impl MockComponent for Logs {
             frame.render_stateful_widget(
                 List::new(lines)
                     .highlight_style(Style::default().white())
-                    .block(Block::bordered().title("logs").border_style(match focus {
-                        true => Style::new().blue(),
-                        false => Style::new().dark_gray(),
-                    })),
+                    .block(
+                        Block::bordered()
+                            .title(format!("{} - {:?}", "logs", self.view_state))
+                            .border_style(crate::tui::border_config(focus)),
+                    ),
                 area,
                 &mut ratatui::widgets::ListState::default().with_selected(Some(self.logs.len())),
             );
@@ -151,45 +164,51 @@ impl MockComponent for Logs {
 
 impl Component<Msg, AppEvent> for Logs {
     fn on(&mut self, e: Event<AppEvent>) -> Option<Msg> {
-        let cmd = match e {
-            Event::Keyboard(KeyEvent {
-                code: Key::Esc,
-                modifiers: KeyModifiers::NONE,
-                ..
-            }) => return Some(Msg::Quit),
+        let logs_keymap: HashMap<Key, Msg> = [(
+            Key::Char('i'),
+            Msg::ChangeToMode(crate::tui::InputMode::Insert),
+        )]
+        .into_iter()
+        .collect();
+        keymap(&e)
+            .or(match e {
+                Event::Keyboard(KeyEvent {
+                    code: key,
+                    modifiers: KeyModifiers::NONE,
+                }) => logs_keymap.get(&key).cloned(),
+                _ => None,
+            })
+            .or_else(|| match e {
+                Event::Keyboard(KeyEvent {
+                    code: Key::Tab,
+                    modifiers: KeyModifiers::NONE,
+                }) => {
+                    self.view_state = match self.view_state {
+                        LogsView::Verbose => LogsView::JustConsole,
+                        LogsView::JustConsole => LogsView::Verbose,
+                    };
+                    Some(Msg::Empty)
+                }
+                Event::Keyboard(KeyEvent {
+                    code: Key::Enter,
+                    modifiers: KeyModifiers::NONE,
+                }) => Some(Msg::GdbInput(StdinCommand::StepInstruction)),
 
-            Event::Keyboard(KeyEvent {
-                code: Key::Enter,
-                modifiers: KeyModifiers::NONE,
-            }) => return Some(Msg::GdbInput(crate::process::StdinCommand::StepInstruction)),
-
-            Event::Keyboard(KeyEvent {
-                code: Key::Char('?'),
-                modifiers: KeyModifiers::NONE,
-            }) => {
-                //Cmd::Submit
-                return Some(Msg::ShowHelp);
-            }
-            Event::Keyboard(_) => Cmd::Submit,
-            Event::User(AppEvent::GdbMi(crate::parser::MiRecord::ConsoleStream(s))) => {
-                self.logs
-                    .push(format!("{}", s.replace("\n", "").replace("\t", " ")));
-                Cmd::Submit
-            }
-            //Event::User(app_event) => {
-            //    self.logs.push(format!("{:?}", app_event));
-            //    Cmd::Submit
-            //}
-
-            // default
-            _ => Cmd::None,
-        };
-
-        match self.perform(cmd) {
-            CmdResult::Changed(_) => Some(Msg::Log),
-            _ => Some(Msg::Empty),
-        }
-        // Does nothing
-        //None
+                Event::User(AppEvent::GdbMi(MiRecord::ConsoleStream(s))) => {
+                    self.logs
+                        .push(format!("{}", s.replace("\n", "").replace("\t", " ")));
+                    Some(Msg::Empty)
+                }
+                Event::User(app_event) => {
+                    match self.view_state {
+                        LogsView::Verbose => {
+                            self.logs.push(format!("{:?}", app_event));
+                        }
+                        _ => {}
+                    }
+                    Some(Msg::Empty)
+                }
+                _ => None,
+            })
     }
 }
