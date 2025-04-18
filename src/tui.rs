@@ -37,9 +37,9 @@ use tuirealm::event::NoUserEvent;
 use tuirealm::MockComponent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum UiState {
+pub enum ViewMode {
     Default,
-    Help,
+    DebugLogs,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -70,6 +70,7 @@ pub enum Msg {
     HideHelp,
     NextView,
     ChangeToMode(InputMode),
+    ChangeViewTo(ViewMode),
     GdbInput(process::StdinCommand),
 }
 
@@ -82,18 +83,38 @@ where
     pub redraw: bool,
     pub terminal: TerminalBridge<T>,
     pub app_data_handle: crate::AppDataHandle,
-    pub ui_state: UiState,
-    /// Modal debugger!
+    pub ui_mode: ViewMode,
     pub input_mode: InputMode,
+    pub help_popup: bool,
+}
+
+impl Model<CrosstermTerminalAdapter> {
+    fn new(app_data: crate::AppDataHandle) -> Self {
+        Self {
+            app: Self::init_app(app_data.channels.event_tx.clone(), app_data.state.clone()),
+            quit: false,
+            redraw: true,
+            terminal: TerminalBridge::init_crossterm().expect("Cannot initialize terminal"),
+            app_data_handle: app_data,
+            ui_mode: ViewMode::Default,
+            input_mode: InputMode::Normal,
+            help_popup: false,
+        }
+    }
 }
 
 pub fn keymap(event: &Event<AppEvent>) -> Option<Msg> {
     use std::collections::HashMap;
     use tuirealm::event::{Key, KeyEvent, KeyModifiers};
-    let common_keymap: HashMap<Key, Msg> =
-        [(Key::Char('?'), Msg::ShowHelp), (Key::Char('q'), Msg::Quit)]
-            .into_iter()
-            .collect();
+    let common_keymap: HashMap<Key, Msg> = [
+        (Key::Char('?'), Msg::ShowHelp),
+        (Key::Char('q'), Msg::Quit),
+        (Key::Char('0'), Msg::ChangeViewTo(ViewMode::DebugLogs)),
+        (Key::Char('1'), Msg::ChangeViewTo(ViewMode::Default)),
+    ]
+    .into_iter()
+    .collect();
+
     //let modal_keymaps: HashMap<InputMode, HashMap<Key, Msg>> = [(
     //    InputMode::Normal,
     //    [(Key::Char('i'), Msg::ChangeToMode(InputMode::Insert))],
@@ -120,20 +141,6 @@ pub fn border_config(focused: bool) -> Style {
     }
 }
 
-impl Model<CrosstermTerminalAdapter> {
-    fn new(app_data: crate::AppDataHandle) -> Self {
-        Self {
-            app: Self::init_app(app_data.channels.event_tx.clone(), app_data.state.clone()),
-            quit: false,
-            redraw: true,
-            terminal: TerminalBridge::init_crossterm().expect("Cannot initialize terminal"),
-            app_data_handle: app_data,
-            ui_state: UiState::Default,
-            input_mode: InputMode::Normal,
-        }
-    }
-}
-
 impl<T> Model<T>
 where
     T: TerminalAdapter,
@@ -154,32 +161,32 @@ where
                         .as_ref(),
                     )
                     .split(f.area());
-                let vertical_chunks = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .margin(1)
-                    .constraints(
-                        [
-                            Constraint::Min(10),        // left
-                            Constraint::Percentage(35), //  regs
-                            Constraint::Percentage(40), //  disasm
-                        ]
-                        .as_ref(),
-                    )
-                    .split(horizontal_chunks[0]);
 
-                let left_subchunks = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints(
-                        [
-                            Constraint::Max(3), // gdbinput
-                            Constraint::Min(1), // logs
-                        ]
-                        .as_ref(),
-                    )
-                    .split(vertical_chunks[0]);
+                match self.ui_mode {
+                    ViewMode::Default => {
+                        let vertical_chunks = Layout::default()
+                            .direction(Direction::Horizontal)
+                            .constraints(
+                                [
+                                    Constraint::Min(10),        // left
+                                    Constraint::Percentage(35), //  regs
+                                    Constraint::Percentage(40), //  disasm
+                                ]
+                                .as_ref(),
+                            )
+                            .split(horizontal_chunks[0]);
 
-                match self.ui_state {
-                    UiState::Default => {
+                        let left_subchunks = Layout::default()
+                            .direction(Direction::Vertical)
+                            .constraints(
+                                [
+                                    Constraint::Max(3), // gdbinput
+                                    Constraint::Min(1), // logs
+                                ]
+                                .as_ref(),
+                            )
+                            .split(vertical_chunks[0]);
+
                         self.app.view(&Id::Logs, f, left_subchunks[1]);
                         self.app.view(&Id::GDbUserInput, f, left_subchunks[0]);
                         self.app.view(&Id::Registers, f, vertical_chunks[1]);
@@ -190,14 +197,29 @@ where
                         );
                         //self.app.view(&Id::Help, f, chunks[0]);
                     }
+                    ViewMode::DebugLogs => {
+                        let left_subchunks = Layout::default()
+                            .direction(Direction::Vertical)
+                            .constraints(
+                                [
+                                    Constraint::Max(3), // gdbinput
+                                    Constraint::Min(1), // logs
+                                ]
+                                .as_ref(),
+                            )
+                            .split(horizontal_chunks[0]);
 
-                    UiState::Help => {
-                        self.app.view(&Id::Logs, f, left_subchunks[1]);
                         self.app.view(&Id::GDbUserInput, f, left_subchunks[0]);
-                        self.app.view(&Id::Registers, f, vertical_chunks[1]);
-                        self.app.view(&Id::Disassembly, f, vertical_chunks[2]);
-                        self.app.view(&Id::Help, f, vertical_chunks[0]);
+                        self.app.view(&Id::Logs, f, left_subchunks[1]);
+                        f.render_widget(
+                            Paragraph::new(format!("{:?}", self.input_mode)),
+                            horizontal_chunks[1],
+                        );
                     }
+                }
+
+                if self.help_popup {
+                    self.app.view(&Id::Help, f, horizontal_chunks[0]);
                 }
             })
             .is_ok());
@@ -315,18 +337,24 @@ where
                     self.input_mode = InputMode::Normal;
                     None
                 }
+
+                Msg::ChangeViewTo(mode) => {
+                    self.ui_mode = mode;
+                    None
+                }
+
                 Msg::NextView => None,
                 Msg::Empty => None,
                 Msg::Log => None,
                 Msg::ShowHelp => {
                     assert!(self.app.active(&Id::Help).is_ok());
-                    self.ui_state = UiState::Help;
+                    self.help_popup = true;
                     None
                 }
 
                 Msg::HideHelp => {
                     assert!(self.app.blur().is_ok());
-                    self.ui_state = UiState::Default;
+                    self.help_popup = false;
                     None
                 }
 

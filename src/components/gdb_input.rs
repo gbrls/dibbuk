@@ -175,6 +175,16 @@ impl Component<Msg, AppEvent> for GdbInput {
             }
 
             Event::Keyboard(KeyEvent {
+                code: event::Key::Backspace,
+                modifiers: KeyModifiers::NONE,
+            }) => {
+                if !self.messages.is_empty() && self.messages.last().unwrap().len() > 0 {
+                    self.messages.last_mut().unwrap().pop();
+                }
+                Some(Msg::Empty)
+            }
+
+            Event::Keyboard(KeyEvent {
                 code: event::Key::Char(c),
                 modifiers: KeyModifiers::NONE,
             }) => {

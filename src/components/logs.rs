@@ -9,7 +9,7 @@ use tuirealm::event::{Key, KeyEvent, KeyModifiers};
 use tuirealm::ratatui::{
     layout::{Constraint, Layout, Position, Rect},
     style::{Color, Modifier, Style, Stylize},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
     Frame, Terminal,
 };
 
@@ -27,7 +27,7 @@ use tuirealm::props::{Alignment, TextModifiers};
 use tuirealm::{Component, Event, Props, State, StateValue};
 
 #[derive(Debug)]
-enum LogsView {
+enum LogsMode {
     JustConsole,
     Verbose,
 }
@@ -35,7 +35,8 @@ enum LogsView {
 pub struct Logs {
     props: Props,
     logs: Vec<String>,
-    view_state: LogsView,
+    view_mode: LogsMode,
+    list_state: ListState,
 }
 
 impl Default for Logs {
@@ -43,7 +44,8 @@ impl Default for Logs {
         Self {
             props: Props::default(),
             logs: Vec::new(),
-            view_state: LogsView::JustConsole,
+            view_mode: LogsMode::JustConsole,
+            list_state: ListState::default(),
         }
     }
 }
@@ -83,7 +85,7 @@ impl MockComponent for Logs {
         // Check if visible
         if self.props.get_or(Attribute::Display, AttrValue::Flag(true)) == AttrValue::Flag(true) {
             // Get properties
-            let lines = self.logs.iter().map(|l| {
+            let lines = self.logs.iter().enumerate().map(|(i, l)| {
                 let style = if l.starts_with("GdbMi") {
                     Style::default().dark_gray()
                 } else if l.starts_with("Gdb") {
@@ -91,43 +93,26 @@ impl MockComponent for Logs {
                 } else {
                     Style::default().blue()
                 };
-                //let style = Style::default();
-                ListItem::new(l.as_str()).style(style)
+
+                match self.view_mode {
+                    LogsMode::Verbose => ListItem::new(format!("[{}] {}", i, l)).style(style),
+                    LogsMode::JustConsole => ListItem::new(l.as_str()).style(style),
+                }
             });
             let focus = self
                 .props
                 .get_or(Attribute::Focus, AttrValue::Flag(true))
                 .unwrap_flag();
-            //println!("{:?}", text);
-            let alignment = self
-                .props
-                .get_or(Attribute::TextAlign, AttrValue::Alignment(Alignment::Left))
-                .unwrap_alignment();
-            let foreground = self
-                .props
-                .get_or(Attribute::Foreground, AttrValue::Color(Color::Reset))
-                .unwrap_color();
-            let background = self
-                .props
-                .get_or(Attribute::Background, AttrValue::Color(Color::Reset))
-                .unwrap_color();
-            let modifiers = self
-                .props
-                .get_or(
-                    Attribute::TextProps,
-                    AttrValue::TextModifiers(TextModifiers::empty()),
-                )
-                .unwrap_text_modifiers();
             frame.render_stateful_widget(
                 List::new(lines)
-                    .highlight_style(Style::default().white())
+                    .highlight_style(Style::default().white().bold())
                     .block(
                         Block::bordered()
-                            .title(format!("{} - {:?}", "logs", self.view_state))
+                            .title(format!("{} - {:?}", "logs", self.view_mode))
                             .border_style(crate::tui::border_config(focus)),
                     ),
                 area,
-                &mut ratatui::widgets::ListState::default().with_selected(Some(self.logs.len())),
+                &mut self.list_state,
             );
         }
     }
@@ -183,9 +168,9 @@ impl Component<Msg, AppEvent> for Logs {
                     code: Key::Tab,
                     modifiers: KeyModifiers::NONE,
                 }) => {
-                    self.view_state = match self.view_state {
-                        LogsView::Verbose => LogsView::JustConsole,
-                        LogsView::JustConsole => LogsView::Verbose,
+                    self.view_mode = match self.view_mode {
+                        LogsMode::Verbose => LogsMode::JustConsole,
+                        LogsMode::JustConsole => LogsMode::Verbose,
                     };
                     Some(Msg::Empty)
                 }
@@ -194,15 +179,65 @@ impl Component<Msg, AppEvent> for Logs {
                     modifiers: KeyModifiers::NONE,
                 }) => Some(Msg::GdbInput(StdinCommand::StepInstruction)),
 
+                Event::Keyboard(KeyEvent {
+                    code: Key::Char('k'),
+                    modifiers: KeyModifiers::NONE,
+                }) => {
+                    self.list_state.scroll_up_by(1);
+                    Some(Msg::Empty)
+                }
+
+                Event::Keyboard(KeyEvent {
+                    code: Key::Char('u'),
+                    modifiers: KeyModifiers::CONTROL,
+                }) => {
+                    self.list_state.scroll_up_by(16);
+                    Some(Msg::Empty)
+                }
+
+                Event::Keyboard(KeyEvent {
+                    code: Key::Char('d'),
+                    modifiers: KeyModifiers::CONTROL,
+                }) => {
+                    self.list_state.scroll_down_by(16);
+                    Some(Msg::Empty)
+                }
+
+                Event::Keyboard(KeyEvent {
+                    code: Key::Char('j'),
+                    modifiers: KeyModifiers::NONE,
+                }) => {
+                    self.list_state.scroll_down_by(1);
+                    Some(Msg::Empty)
+                }
+
+                Event::Keyboard(KeyEvent {
+                    code: Key::Char('G'),
+                    modifiers: KeyModifiers::SHIFT,
+                }) => {
+                    self.list_state.select_last();
+                    Some(Msg::Empty)
+                }
+
+                Event::Keyboard(KeyEvent {
+                    code: Key::Char('g'),
+                    modifiers: KeyModifiers::NONE,
+                }) => {
+                    self.list_state.select_first();
+                    Some(Msg::Empty)
+                }
+
                 Event::User(AppEvent::GdbMi(MiRecord::ConsoleStream(s))) => {
                     self.logs
                         .push(format!("{}", s.replace("\n", "").replace("\t", " ")));
+                    self.list_state.select_last();
                     Some(Msg::Empty)
                 }
                 Event::User(app_event) => {
-                    match self.view_state {
-                        LogsView::Verbose => {
+                    match self.view_mode {
+                        LogsMode::Verbose => {
                             self.logs.push(format!("{:?}", app_event));
+                            self.list_state.select_last();
                         }
                         _ => {}
                     }

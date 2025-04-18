@@ -75,7 +75,8 @@ impl MockComponent for Registers {
             let mem =
                 if maybe_range.is_some() && maybe_range.unwrap().map_range.filename().is_some() {
                     format!(
-                        "{} +{:#04x}",
+                        "{} {} +{:#04x}",
+                        maybe_range.unwrap().map_range.flags,
                         maybe_range
                             .unwrap()
                             .map_range

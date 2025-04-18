@@ -164,6 +164,16 @@ async fn main() {
             for cmd in start_cmds {
                 gdb_command_tx.send(cmd).unwrap();
             }
+
+            let slow_cmds = vec![
+                process::StdinCommand::Input("si".into()),
+                process::StdinCommand::Input("si".into()),
+            ];
+
+            for cmd in slow_cmds {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                gdb_command_tx.send(cmd).unwrap();
+            }
         }
     });
 
