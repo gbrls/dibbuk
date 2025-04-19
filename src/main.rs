@@ -2,9 +2,10 @@ mod components;
 mod elf;
 mod manager;
 mod mi2command;
+mod tui;
 mod parser;
 mod process;
-mod tui;
+mod theme;
 
 use mi2command::GdbContext;
 use mi2command::GdbMessage;
@@ -40,6 +41,7 @@ pub struct CliArgs {
 #[derive(Debug, Clone, Eq)]
 pub enum AppEvent {
     Gdb(GdbMessage),
+    Log(String),
     GdbMi(parser::MiRecord),
     Any,
 }
@@ -145,6 +147,9 @@ impl App {
 async fn main() {
     let cli = CliArgs::parse();
 
+    //TODO: tokio debugger; add cli flags to use it
+    console_subscriber::init();
+
     let (app, gdb_stdin_rx) = App::new(&cli);
 
     // initial commands to gdb
@@ -181,10 +186,14 @@ async fn main() {
         gdb_stdin_rx,
         app.gdb_mi_tx.clone(),
         app.data_handle(),
-    ));
+    )); // WARN: occupies a large amount of space 1536 bytes
     let app_handle = tokio::spawn(mi2command::run(app.data_handle()));
-    let tui_handle = tokio::spawn(tui::run(app.data_handle()));
     let mgr_handle = tokio::spawn(manager::run(app.data_handle()));
+
+    let local = tokio::task::LocalSet::new();
+    //let tui_handle = local.spawn_local(tui::run(app.data_handle())); // WARN: never yielded
+    //let tui_handle = tokio::spawn(tui::run(app.data_handle())); // WARN: never yielded
+    let tui_handle = tokio::spawn(tui::run(app.data_handle())); // WARN: never yielded
 
     // 4. Shutdown handler
     tokio::select! {

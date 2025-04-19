@@ -16,8 +16,8 @@ impl UserInput {
     }
 }
 
-impl crate::ntui::Component for UserInput {
-    fn view(&self, frame: &mut Frame, rect: Rect, focused: bool) {
+impl crate::tui::Component for UserInput {
+    fn view(&mut self, frame: &mut Frame, rect: Rect, focused: bool) {
         frame.render_widget(
             Paragraph::new(self.history.last().unwrap().as_str())
                 .style(Color::Red)
@@ -50,9 +50,24 @@ impl crate::ntui::Component for UserInput {
                 ..
             }) => {
                 let mut cmd = self.history.last().unwrap().clone();
-                self.history.push(String::new());
+                if cmd.is_empty() && self.history.len() >= 2 {
+                    cmd = self.history[self.history.len() - 2].clone();
+                } else {
+                    self.history.push(String::new());
+                }
+
                 let tx = crate::process::StdinCommand::Input(cmd);
                 app_data_handle.channels.gdb_stdin_tx.send(tx).unwrap();
+            }
+
+            Event::Key(KeyEvent {
+                code: KeyCode::Backspace,
+                modifiers: KeyModifiers::NONE,
+                ..
+            }) => {
+                if !self.history.is_empty() && self.history.last().unwrap().len() > 0 {
+                    self.history.last_mut().unwrap().pop();
+                }
             }
 
             _ => {}

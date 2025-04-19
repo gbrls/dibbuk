@@ -84,7 +84,7 @@ pub async fn spawn_gdb_process(
         cmd.process_group(0);
     }
 
-    println!("[Proxy Setup] Spawning GDB: {:?}", cmd);
+    eprintln!("[Proxy Setup] Spawning GDB: {:?}", cmd);
     let mut child = match cmd.spawn() {
         Ok(child) => child,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -95,7 +95,7 @@ pub async fn spawn_gdb_process(
         }
     };
     let pid = child.id().unwrap_or(0);
-    println!("[Proxy Setup] GDB process spawned (PID: {})", pid);
+    eprintln!("[Proxy Setup] GDB process spawned (PID: {})", pid);
 
     let stdin = child.stdin.take().ok_or(GdbProcessError::MissingStdin)?;
     let stdout = child.stdout.take().ok_or(GdbProcessError::MissingStdout)?;
@@ -262,7 +262,6 @@ pub async fn run_event_loop(
 async fn gdb_commands_loop(mut gdb_stdin: ChildStdin, mut cmd_rx: UnboundedReceiver<StdinCommand>) {
     while let Some(cmd) = cmd_rx.recv().await {
         use StdinCommand::*;
-        //println!("recv!!!! {:?}", cmd);
         let mut cmd_ascii = match cmd {
             AddBreakpoint(loc) => format!("-break-insert {}", loc),
             Run => "-exec-run".into(),
@@ -281,14 +280,21 @@ async fn gdb_commands_loop(mut gdb_stdin: ChildStdin, mut cmd_rx: UnboundedRecei
                 format!("-data-disassemble -s \"$pc-{}\" -e \"$pc+{}\"", start, end)
             }
             Quit => "exit".into(),
-            Input(s) => s,
+            Input(s) => {
+                s
+            }
             _ => todo!("ops..."),
         };
         cmd_ascii.push('\n');
         //cmd_ascii.push('\n');
-        gdb_stdin
-            .write_all(cmd_ascii.as_bytes())
-            .await
-            .and_then(|_| Ok(gdb_stdin.flush()));
+        if let Err(e) = gdb_stdin.write_all(cmd_ascii.as_bytes()).await {
+            eprintln!("Error writing to GDB stdin: {}. Stopping command loop.", e);
+            break; // Exit loop on write error
+        }
+
+        if let Err(e) = gdb_stdin.flush().await {
+            eprintln!("Error flushing GDB stdin: {}. Stopping command loop.", e);
+            break; // Exit loop on flush error
+        }
     }
 }

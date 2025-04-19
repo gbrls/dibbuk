@@ -1,34 +1,23 @@
-use crate::tui::Msg;
-use crate::AppEvent;
-use std::collections::HashMap;
-use tuirealm::command::{Cmd, CmdResult};
-use tuirealm::ratatui::prelude::*;
-use tuirealm::ratatui::widgets::*;
-use tuirealm::MockComponent;
-use tuirealm::{Component, Event, Props, State, StateValue};
+use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use ratatui::widgets::*;
+use ratatui::prelude::*;
+use std::time::{Duration, SystemTime};
 
-use tuirealm::{
-    Application, AttrValue, Attribute, EventListenerCfg, Sub, SubClause, SubEventClause, Update,
-};
-
-pub struct Registers {
-    props: Props,
-    value: HashMap<String, u64>,
+pub struct NRegisters {
+    value: std::collections::HashMap<String, u64>,
     memory_maps: Vec<crate::mi2command::MemMap>,
 }
-
-impl Default for Registers {
-    fn default() -> Self {
-        Self {
-            props: Props::default(),
-            value: HashMap::new(),
+impl NRegisters {
+    pub fn new() -> Self {
+        NRegisters {
+            value: std::collections::HashMap::new(),
             memory_maps: Vec::new(),
         }
     }
 }
 
-impl MockComponent for Registers {
-    fn view(&mut self, frame: &mut Frame, area: Rect) {
+impl crate::tui::Component for NRegisters {
+    fn view(&mut self, frame: &mut Frame, rect: Rect, focused: bool) {
         let register_names = self.value.keys();
         let state_message =
             Paragraph::new(format!("rip -> {:#x}", self.value.get("rip").unwrap_or(&0)));
@@ -115,42 +104,28 @@ impl MockComponent for Registers {
             )
             .column_spacing(2);
 
-        frame.render_widget(register_table, area)
+        frame.render_widget(register_table, rect)
     }
 
-    fn query(&self, attr: Attribute) -> Option<AttrValue> {
-        self.props.get(attr)
+    fn handle_terminal_event(
+        &mut self,
+        event: &crossterm::event::Event,
+        app_data_handle: &crate::AppDataHandle,
+    ) {
     }
-
-    fn attr(&mut self, attr: Attribute, value: AttrValue) {
-        self.props.set(attr, value);
-    }
-
-    fn state(&self) -> State {
-        State::None
-    }
-
-    fn perform(&mut self, cmd: Cmd) -> CmdResult {
-        CmdResult::None
-    }
-}
-
-impl Component<Msg, AppEvent> for Registers {
-    fn on(&mut self, e: Event<AppEvent>) -> Option<Msg> {
-        match e {
-            Event::User(AppEvent::Gdb(crate::mi2command::GdbMessage::RegisterValue(regs))) => {
+    fn handle_app_event(&mut self, event: &crate::AppEvent) {
+        match event {
+            crate::AppEvent::Gdb(crate::mi2command::GdbMessage::RegisterValue(regs)) => {
                 for (k, v) in regs.iter() {
                     self.value.insert(k.clone(), *v);
                 }
-                return Some(Msg::Empty);
             }
 
-            Event::User(AppEvent::Gdb(crate::mi2command::GdbMessage::Maps(maps))) => {
-                self.memory_maps = maps;
+            crate::AppEvent::Gdb(crate::mi2command::GdbMessage::Maps(maps)) => {
+                self.memory_maps = maps.clone();
             }
 
             _ => {}
         }
-        None
     }
 }

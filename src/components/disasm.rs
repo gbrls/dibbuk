@@ -1,40 +1,27 @@
-use crate::tui::Msg;
-use crate::AppEvent;
-use std::collections::HashMap;
+use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use ratatui::widgets;
+use std::time::{Duration, SystemTime};
 use tuirealm::command::{Cmd, CmdResult};
-use tuirealm::ratatui::prelude::*;
-use tuirealm::ratatui::widgets::*;
-use tuirealm::MockComponent;
-use tuirealm::{Component, Event, Props, State, StateValue};
+use tuirealm::ratatui::{prelude::*, widgets::*, Frame, Terminal};
 
-use crate::mi2command;
-use crate::mi2command::GdbMessage::DisassemblyNative;
-
-use tuirealm::{
-    Application, AttrValue, Attribute, EventListenerCfg, Sub, SubClause, SubEventClause, Update,
-};
-
-pub struct Disassembly {
-    props: Props,
-    value: HashMap<usize, mi2command::Disassembly>,
+pub struct Disasm {
+    value: std::collections::HashMap<usize, crate::mi2command::Disassembly>,
     instruction_pointer: Option<u64>,
 }
 
-impl Default for Disassembly {
-    fn default() -> Self {
-        Self {
-            props: Props::default(),
-            value: HashMap::new(),
+impl Disasm {
+    pub fn new() -> Self {
+        Disasm {
+            value: std::collections::HashMap::new(),
             instruction_pointer: None,
         }
     }
 }
 
-impl MockComponent for Disassembly {
-    fn view(&mut self, frame: &mut Frame, area: Rect) {
+impl crate::tui::Component for Disasm {
+    fn view(&mut self, frame: &mut Frame, rect: Rect, focused: bool) {
         let register_names = self.value.keys();
 
-        use ratatui::widgets::{Cell, Row, Table};
         let header_cells = ["Address", "Asm"]
             .iter()
             .map(|h| Cell::from(*h).style(Style::default().bold()));
@@ -78,47 +65,26 @@ impl MockComponent for Disassembly {
             .row_highlight_style(Style::default().reversed());
 
         let mut table_state = ratatui::widgets::TableState::default().with_selected(selected);
-        frame.render_stateful_widget(register_table, area, &mut table_state)
+        frame.render_stateful_widget(register_table, rect, &mut table_state)
     }
-
-    fn query(&self, attr: Attribute) -> Option<AttrValue> {
-        self.props.get(attr)
-    }
-
-    fn attr(&mut self, attr: Attribute, value: AttrValue) {
-        self.props.set(attr, value);
-    }
-
-    fn state(&self) -> State {
-        State::None
-    }
-
-    fn perform(&mut self, cmd: Cmd) -> CmdResult {
-        CmdResult::None
-    }
-}
-
-impl Component<Msg, AppEvent> for Disassembly {
-    fn on(&mut self, e: Event<AppEvent>) -> Option<Msg> {
-        match e {
-            Event::User(AppEvent::Gdb(DisassemblyNative(asm_lines))) => {
+    fn handle_app_event(&mut self, event: &crate::AppEvent) {
+        match event {
+            crate::AppEvent::Gdb(crate::mi2command::GdbMessage::DisassemblyNative(asm_lines)) => {
                 for asm in asm_lines.iter() {
                     self.value.insert(asm.addr, asm.clone());
                 }
-                return Some(Msg::Empty);
             }
 
-            Event::User(AppEvent::Gdb(crate::mi2command::GdbMessage::RegisterValue(regs))) => {
+            crate::AppEvent::Gdb(crate::mi2command::GdbMessage::RegisterValue(regs)) => {
                 for (k, v) in regs.iter() {
                     if k == "rip" {
                         self.instruction_pointer = Some(*v);
                     }
                 }
-                return Some(Msg::Empty);
             }
 
             _ => {}
         }
-        None
     }
+    fn handle_terminal_event(&mut self, event: &Event, app_data_handle: &crate::AppDataHandle) {}
 }

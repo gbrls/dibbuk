@@ -1,40 +1,27 @@
-// src/tui.rs
-
-use futures_util::FutureExt;
-
-use tuirealm::listener::{ListenerResult, Poll};
-
-use tuirealm::application::PollStrategy;
-
-use crate::components::*;
-use crate::{mi2command, process};
-use color_eyre::Result;
-use crossterm;
-
-use crossterm::event::{self, Event as CrosstermEvent, KeyCode, KeyEvent, KeyEventKind};
-use futures_util::stream::StreamExt; // Required for EventStream::next()
-use ratatui::{
-    backend::Backend,
-    layout::{Constraint, Layout, Position, Rect},
-    style::{Color, Modifier, Style, Stylize},
-    text::{Line, Span, Text},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
-    Frame, Terminal,
-};
-use std::time::{Duration, SystemTime};
-use tuirealm::command::{Cmd, CmdResult};
-
-use tuirealm::{
-    Application, AttrValue, Attribute, EventListenerCfg, Sub, SubClause, SubEventClause, Update,
-};
-
+use futures_util::{FutureExt, StreamExt};
+use ratatui::crossterm;
+use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
+use ratatui::crossterm::ExecutableCommand;
+use ratatui::prelude::*;
+use ratatui::widgets;
+use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::select; // Use tokio's select macro
-use tokio::sync::{broadcast, mpsc};
-use tuirealm::terminal::{CrosstermTerminalAdapter, TerminalAdapter, TerminalBridge};
+use std::time::Duration;
+use tokio::{select, time};
 
-use tuirealm::event::NoUserEvent;
-use tuirealm::MockComponent;
+#[derive(Debug, Copy, Clone, Hash)]
+pub enum ModelAction {
+    Quit,
+    ChangeInputMode(InputMode),
+    ChangeViewMode(ViewMode),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InputMode {
+    Insert,
+    Normal,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ViewMode {
@@ -42,10 +29,10 @@ pub enum ViewMode {
     DebugLogs,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum InputMode {
-    Insert,
-    Normal,
+pub trait Component {
+    fn view(&mut self, frame: &mut Frame, rect: Rect, focused: bool);
+    fn handle_terminal_event(&mut self, event: &Event, app_data_handle: &crate::AppDataHandle);
+    fn handle_app_event(&mut self, event: &crate::AppEvent);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -58,403 +45,283 @@ pub enum Id {
     GDbUserInput,
 }
 
-use tuirealm::props::{Alignment, TextModifiers};
-use tuirealm::{Component, Event, Props, State};
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Msg {
-    Quit,
-    Empty,
-    Log,
-    ShowHelp,
-    HideHelp,
-    NextView,
-    ChangeToMode(InputMode),
-    ChangeViewTo(ViewMode),
-    GdbInput(process::StdinCommand),
-}
-
-pub struct Model<T>
-where
-    T: TerminalAdapter,
-{
-    pub app: Application<Id, Msg, AppEvent>,
-    pub quit: bool,
-    pub redraw: bool,
-    pub terminal: TerminalBridge<T>,
-    pub app_data_handle: crate::AppDataHandle,
-    pub ui_mode: ViewMode,
+struct Model {
+    pub app_data: crate::AppDataHandle,
+    pub should_quit: bool,
     pub input_mode: InputMode,
-    pub help_popup: bool,
+    pub view_mode: ViewMode,
+    pub components: HashMap<Id, Arc<dyn Component>>,
+    pub focus_stack: Vec<Id>,
 }
+unsafe impl Send for Model {}
+unsafe impl Sync for Model {}
 
-impl Model<CrosstermTerminalAdapter> {
+impl Model {
     fn new(app_data: crate::AppDataHandle) -> Self {
-        Self {
-            app: Self::init_app(app_data.channels.event_tx.clone(), app_data.state.clone()),
-            quit: false,
-            redraw: true,
-            terminal: TerminalBridge::init_crossterm().expect("Cannot initialize terminal"),
-            app_data_handle: app_data,
-            ui_mode: ViewMode::Default,
-            input_mode: InputMode::Normal,
-            help_popup: false,
+        Model {
+            app_data,
+            should_quit: false,
+            input_mode: InputMode::Insert,
+            view_mode: ViewMode::Default,
+            components: HashMap::new(),
+            focus_stack: Vec::new(),
         }
     }
-}
 
-pub fn keymap(event: &Event<AppEvent>) -> Option<Msg> {
-    use std::collections::HashMap;
-    use tuirealm::event::{Key, KeyEvent, KeyModifiers};
-    let common_keymap: HashMap<Key, Msg> = [
-        (Key::Char('?'), Msg::ShowHelp),
-        (Key::Char('q'), Msg::Quit),
-        (Key::Char('0'), Msg::ChangeViewTo(ViewMode::DebugLogs)),
-        (Key::Char('1'), Msg::ChangeViewTo(ViewMode::Default)),
-    ]
-    .into_iter()
-    .collect();
-
-    //let modal_keymaps: HashMap<InputMode, HashMap<Key, Msg>> = [(
-    //    InputMode::Normal,
-    //    [(Key::Char('i'), Msg::ChangeToMode(InputMode::Insert))],
-    //)]
-    //.into_iter()
-    //.map(|(mode, maps)| (mode, maps.into_iter().collect()))
-    //.collect();
-
-    match event {
-        Event::Keyboard(KeyEvent {
-            code: key,
-            modifiers: KeyModifiers::NONE,
-            ..
-        }) => common_keymap.get(&key).cloned(),
-
-        _ => None,
+    /// Only updates the focused element with input from terminal
+    fn handle_terminal_event(&mut self, event: Event) -> Option<ModelAction> {
+        let focused = self.focus_stack.last();
+        match event {
+            Event::Key(KeyEvent {
+                code, modifiers, ..
+            }) => self.keybind(code, modifiers).or_else(|| {
+                for (id, mut component) in self.components.iter_mut() {
+                    if focused.is_some() && focused.unwrap() == id {
+                        Arc::get_mut(&mut component)
+                            .unwrap()
+                            .handle_terminal_event(&event, &self.app_data);
+                    }
+                }
+                None
+            }),
+            _ => None,
+        }
     }
-}
 
-pub fn border_config(focused: bool) -> Style {
-    match focused {
-        true => Style::new().blue(),
-        false => Style::new().dark_gray(),
+    /// Updates all elements
+    fn handle_app_event(&mut self, event: crate::AppEvent) -> Option<ModelAction> {
+        for (id, mut component) in self.components.iter_mut() {
+            Arc::get_mut(&mut component)
+                .unwrap()
+                .handle_app_event(&event);
+        }
+        None
     }
-}
 
-impl<T> Model<T>
-where
-    T: TerminalAdapter,
-{
-    pub fn view(&mut self) {
-        use tuirealm::ratatui::layout::{Constraint, Direction, Layout};
-        assert!(self
-            .terminal
-            .draw(|f| {
+    fn keybind(&self, code: KeyCode, modifiers: KeyModifiers) -> Option<ModelAction> {
+        use InputMode::*;
+        use ModelAction::*;
+        match (self.input_mode, code, modifiers) {
+            (Normal, KeyCode::Char('q'), _) => Some(Quit),
+            (Normal, KeyCode::Char('i'), _) => Some(ChangeInputMode(Insert)),
+
+            (Normal, KeyCode::Char('0'), _) => Some(ChangeViewMode(ViewMode::DebugLogs)),
+            (Normal, KeyCode::Char('1'), _) => Some(ChangeViewMode(ViewMode::Default)),
+
+            (Insert, KeyCode::Esc, _) => Some(ChangeInputMode(Normal)),
+            _ => None,
+        }
+    }
+
+    fn update(&mut self, action: ModelAction) {
+        match action {
+            ModelAction::Quit => {
+                self.should_quit = true;
+            }
+            ModelAction::ChangeInputMode(InputMode::Insert) => {
+                self.input_mode = InputMode::Insert;
+                self.unfocus();
+                self.focus(&Id::GDbUserInput);
+            }
+
+            ModelAction::ChangeInputMode(InputMode::Normal) => {
+                self.input_mode = InputMode::Normal;
+                self.unfocus();
+                self.focus(&Id::Logs);
+            }
+
+            ModelAction::ChangeViewMode(mode) => {
+                self.view_mode = mode;
+            }
+        }
+    }
+
+    fn view(&mut self, frame: &mut Frame, rect: Rect) {
+        let focused = self.focus_stack.last();
+        match self.view_mode {
+            ViewMode::Default => {
                 let horizontal_chunks = Layout::default()
                     .direction(Direction::Vertical)
-                    .margin(1)
                     .constraints(
                         [
-                            Constraint::Percentage(98), // logs
-                            Constraint::Max(4),         //  statusbar
+                            Constraint::Max(4),         //  input
+                            Constraint::Percentage(80), // logs
+                            Constraint::Max(4),         //  help
                         ]
                         .as_ref(),
                     )
-                    .split(f.area());
+                    .split(frame.area());
 
-                match self.ui_mode {
-                    ViewMode::Default => {
-                        let vertical_chunks = Layout::default()
-                            .direction(Direction::Horizontal)
-                            .constraints(
-                                [
-                                    Constraint::Min(10),        // left
-                                    Constraint::Percentage(35), //  regs
-                                    Constraint::Percentage(40), //  disasm
-                                ]
-                                .as_ref(),
-                            )
-                            .split(horizontal_chunks[0]);
+                let vertical_chunks = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints(
+                        [
+                            Constraint::Min(10),        // left
+                            Constraint::Percentage(35), //  regs
+                            Constraint::Percentage(40), //  disasm
+                        ]
+                        .as_ref(),
+                    )
+                    .split(horizontal_chunks[1]);
 
-                        let left_subchunks = Layout::default()
-                            .direction(Direction::Vertical)
-                            .constraints(
-                                [
-                                    Constraint::Max(3), // gdbinput
-                                    Constraint::Min(1), // logs
-                                ]
-                                .as_ref(),
-                            )
-                            .split(vertical_chunks[0]);
+                Arc::get_mut(&mut self.components.get_mut(&Id::GDbUserInput).unwrap())
+                    .unwrap()
+                    .view(
+                        frame,
+                        horizontal_chunks[0],
+                        focused.is_some() && focused.unwrap() == &Id::GDbUserInput,
+                    );
 
-                        self.app.view(&Id::Logs, f, left_subchunks[1]);
-                        self.app.view(&Id::GDbUserInput, f, left_subchunks[0]);
-                        self.app.view(&Id::Registers, f, vertical_chunks[1]);
-                        self.app.view(&Id::Disassembly, f, vertical_chunks[2]);
-                        f.render_widget(
-                            Paragraph::new(format!("{:?}", self.input_mode)),
-                            horizontal_chunks[1],
-                        );
-                        //self.app.view(&Id::Help, f, chunks[0]);
-                    }
-                    ViewMode::DebugLogs => {
-                        let left_subchunks = Layout::default()
-                            .direction(Direction::Vertical)
-                            .constraints(
-                                [
-                                    Constraint::Max(3), // gdbinput
-                                    Constraint::Min(1), // logs
-                                ]
-                                .as_ref(),
-                            )
-                            .split(horizontal_chunks[0]);
+                Arc::get_mut(&mut self.components.get_mut(&Id::Logs).unwrap())
+                    .unwrap()
+                    .view(
+                        frame,
+                        vertical_chunks[0],
+                        focused.is_some() && focused.unwrap() == &Id::Logs,
+                    );
 
-                        self.app.view(&Id::GDbUserInput, f, left_subchunks[0]);
-                        self.app.view(&Id::Logs, f, left_subchunks[1]);
-                        f.render_widget(
-                            Paragraph::new(format!("{:?}", self.input_mode)),
-                            horizontal_chunks[1],
-                        );
-                    }
-                }
+                Arc::get_mut(&mut self.components.get_mut(&Id::Registers).unwrap())
+                    .unwrap()
+                    .view(
+                        frame,
+                        vertical_chunks[1],
+                        focused.is_some() && focused.unwrap() == &Id::Registers,
+                    );
 
-                if self.help_popup {
-                    self.app.view(&Id::Help, f, horizontal_chunks[0]);
-                }
-            })
-            .is_ok());
-    }
-    fn init_app(
-        app_events_rx: broadcast::Sender<AppEvent>,
-        app_state_ref: std::sync::Arc<tokio::sync::RwLock<crate::AppState>>,
-    ) -> Application<Id, Msg, AppEvent> {
-        //TODO: This code needs to be refactored
-        let mut app: Application<Id, Msg, AppEvent> = Application::init(
-            EventListenerCfg::default()
-                .crossterm_input_listener(Duration::from_millis(20), 3)
-                .poll_timeout(Duration::from_millis(10))
-                .tick_interval(Duration::from_secs(1))
-                .add_port(
-                    Box::new(BroadcastPoller::new(&app_events_rx)),
-                    Duration::from_millis(50),
-                    5,
-                ),
-        );
-
-        assert!(app
-            .mount(
-                Id::Logs,
-                Box::new(
-                    Logs::default()
-                        .text("Waiting for a Msg...")
-                        .alignment(Alignment::Left)
-                        .background(Color::Reset)
-                        .foreground(Color::LightYellow)
-                        .modifiers(TextModifiers::BOLD),
-                ),
-                Vec::default(),
-            )
-            .is_ok());
-
-        assert!(app
-            .mount(Id::Help, Box::new(Help::default()), Vec::default())
-            .is_ok());
-
-        assert!(app
-            .mount(
-                Id::GDbUserInput,
-                Box::new(GdbInput::default()),
-                Vec::default()
-            )
-            .is_ok());
-
-        assert!(app
-            .mount(
-                Id::Registers,
-                Box::new(Registers::default()),
-                Vec::default()
-            )
-            .is_ok());
-
-        assert!(app
-            .subscribe(
-                &Id::Registers,
-                Sub::new(SubEventClause::User(AppEvent::Any), SubClause::Always)
-            )
-            .is_ok());
-
-        assert!(app
-            .mount(
-                Id::Disassembly,
-                Box::new(Disassembly::default()),
-                Vec::default()
-            )
-            .is_ok());
-
-        assert!(app
-            .subscribe(
-                &Id::Disassembly,
-                Sub::new(SubEventClause::User(AppEvent::Any), SubClause::Always)
-            )
-            .is_ok());
-
-        assert!(app
-            .subscribe(
-                &Id::Logs,
-                Sub::new(SubEventClause::User(AppEvent::Any), SubClause::Always)
-            )
-            .is_ok());
-
-        // active!
-        //assert!(app.active(&Id::Help).is_ok());
-        assert!(app.active(&Id::Logs).is_ok());
-        //assert!(app.active(&Id::GDbUserInput).is_ok());
-        app
-    }
-}
-
-impl<T> Update<Msg> for Model<T>
-where
-    T: TerminalAdapter,
-{
-    fn update(&mut self, msg: Option<Msg>) -> Option<Msg> {
-        if let Some(msg) = msg {
-            // Set redraw
-            self.redraw = true;
-            // Match message
-            match msg {
-                Msg::Quit => {
-                    self.quit = true;
-                    None
-                }
-                Msg::ChangeToMode(InputMode::Insert) => {
-                    assert!(self.app.active(&Id::GDbUserInput).is_ok());
-                    self.input_mode = InputMode::Insert;
-                    None
-                }
-                Msg::ChangeToMode(InputMode::Normal) => {
-                    assert!(self.app.active(&Id::Logs).is_ok());
-                    self.input_mode = InputMode::Normal;
-                    None
-                }
-
-                Msg::ChangeViewTo(mode) => {
-                    self.ui_mode = mode;
-                    None
-                }
-
-                Msg::NextView => None,
-                Msg::Empty => None,
-                Msg::Log => None,
-                Msg::ShowHelp => {
-                    assert!(self.app.active(&Id::Help).is_ok());
-                    self.help_popup = true;
-                    None
-                }
-
-                Msg::HideHelp => {
-                    assert!(self.app.blur().is_ok());
-                    self.help_popup = false;
-                    None
-                }
-
-                Msg::GdbInput(cmd) => {
-                    tokio::spawn({
-                        let gdb_command_tx = self.app_data_handle.channels.gdb_stdin_tx.clone();
-                        async move {
-                            gdb_command_tx.send(cmd).unwrap();
-                        }
-                    });
-                    None
-                    //Some(Msg::Empty)
-                }
+                Arc::get_mut(&mut self.components.get_mut(&Id::Disassembly).unwrap())
+                    .unwrap()
+                    .view(
+                        frame,
+                        vertical_chunks[2],
+                        focused.is_some() && focused.unwrap() == &Id::Disassembly,
+                    );
+                Arc::get_mut(&mut self.components.get_mut(&Id::Help).unwrap())
+                    .unwrap()
+                    .view(
+                        frame,
+                        horizontal_chunks[2],
+                        focused.is_some() && focused.unwrap() == &Id::Help,
+                    );
             }
+            ViewMode::DebugLogs => {
+                let horizontal_chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints(
+                        [
+                            Constraint::Max(4),         //  input
+                            Constraint::Percentage(80), // logs
+                        ]
+                        .as_ref(),
+                    )
+                    .split(frame.area());
+
+                Arc::get_mut(&mut self.components.get_mut(&Id::GDbUserInput).unwrap())
+                    .unwrap()
+                    .view(
+                        frame,
+                        horizontal_chunks[0],
+                        focused.is_some() && focused.unwrap() == &Id::GDbUserInput,
+                    );
+
+                Arc::get_mut(&mut self.components.get_mut(&Id::Logs).unwrap())
+                    .unwrap()
+                    .view(
+                        frame,
+                        horizontal_chunks[1],
+                        focused.is_some() && focused.unwrap() == &Id::Logs,
+                    );
+            } //_ => {}
+        }
+        //frame.render_widget(
+        //    widgets::Paragraph::new(format!("{:?} {:?}", self.view_mode, self.input_mode)),
+        //    rect,
+        //);
+    }
+
+    fn focus(&mut self, id: &Id) {
+        if !self.focus_stack.is_empty() && self.focus_stack.last().unwrap() == id {
+        } else {
+            self.focus_stack.push(*id);
+        }
+    }
+
+    fn unfocus(&mut self) -> Option<Id> {
+        if !self.focus_stack.is_empty() {
+            self.focus_stack.pop()
         } else {
             None
         }
     }
 }
 
-use crate::AppEvent;
+pub async fn run(app_data_handle: crate::AppDataHandle) {
+    use std::io::stdout;
 
-pub struct BroadcastPoller {
-    receiver: broadcast::Receiver<AppEvent>,
+    // initialization
+    let backend = ratatui::backend::CrosstermBackend::new(stdout());
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+
+    stdout().execute(EnterAlternateScreen).unwrap();
+    crossterm::terminal::enable_raw_mode().unwrap();
+
+    //time::sleep(std::time::Duration::from_millis(1000)).await;
+    main_loop(app_data_handle, terminal).await;
+
+    // cleanup
+    crossterm::terminal::disable_raw_mode().unwrap();
+    stdout().execute(LeaveAlternateScreen).unwrap();
 }
 
-impl BroadcastPoller {
-    pub fn new(sender: &broadcast::Sender<AppEvent>) -> Self {
-        Self {
-            receiver: sender.subscribe(),
-        }
-    }
+async fn main_loop<B: Backend>(app_data_handle: crate::AppDataHandle, mut term: Terminal<B>) {
+    let mut ticker = time::interval(Duration::from_millis(10));
+    let mut model = Model::new(app_data_handle);
+    let mut term_event_reader = crossterm::event::EventStream::new();
 
-    pub fn from_receiver(receiver: broadcast::Receiver<AppEvent>) -> Self {
-        Self { receiver }
-    }
-}
+    let mut app_event_rx = model.app_data.channels.event_tx.subscribe();
 
-impl Poll<AppEvent> for BroadcastPoller {
-    fn poll(&mut self) -> ListenerResult<Option<Event<AppEvent>>> {
-        match self.receiver.try_recv() {
-            Ok(user_event) => Ok(Some(Event::User(user_event))),
-            Err(broadcast::error::TryRecvError::Empty) => Ok(None),
-            Err(broadcast::error::TryRecvError::Lagged(count)) => {
-                //eprintln!("WARN: Broadcast receiver lagged by {} messages.", count);
-                Ok(None)
+    model
+        .components
+        .insert(Id::Help, Arc::new(crate::components::help::Help::new()));
+
+    model.components.insert(
+        Id::GDbUserInput,
+        Arc::new(crate::components::user_input::UserInput::new()),
+    );
+
+    model
+        .components
+        .insert(Id::Logs, Arc::new(crate::components::logs::Logs::new()));
+
+    model.components.insert(
+        Id::Registers,
+        Arc::new(crate::components::NRegisters::new()),
+    );
+
+    model
+        .components
+        .insert(Id::Disassembly, Arc::new(crate::components::Disasm::new()));
+
+    model.focus(&Id::GDbUserInput);
+
+    while !model.should_quit {
+        let tick = ticker.tick();
+        let term_event = term_event_reader.next().fuse();
+        select! {
+            _ = tick => {
+                term.draw(|f| {
+                    model.view(f, f.area());
+                });
             }
-            Err(broadcast::error::TryRecvError::Closed) => Ok(None),
-        }
-    }
-}
-
-fn blocking_start(app_data: crate::AppDataHandle) {
-    let mut model = Model::new(app_data);
-
-    let _ = model.terminal.enter_alternate_screen();
-    let _ = model.terminal.enable_raw_mode();
-
-    while !model.quit {
-        // Tick
-        match model.app.tick(PollStrategy::Once) {
-            Err(err) => {
-                //assert!(model
-                //    .app
-                //    .attr(
-                //        &Id::Logs,
-                //        Attribute::Text,
-                //        AttrValue::String(format!("Application error: {}", err)),
-                //    )
-                //    .is_ok());
-            }
-            Ok(messages) if messages.len() > 0 => {
-                model.redraw = true;
-                for msg in messages.into_iter() {
-                    let mut msg = Some(msg);
-                    while msg.is_some() {
-                        msg = model.update(msg);
-                    }
+            Some(Ok(term_event)) = term_event => {
+                if let Some(action) = model.handle_terminal_event(term_event) {
+                    model.update(action);
                 }
             }
-            _ => {}
-        }
-
-        // Redraw
-        if model.redraw {
-            model.view();
-            model.redraw = false;
+            Ok(event) = app_event_rx.recv().fuse() => {
+                if let Some(action) = model.handle_app_event(event) {
+                    model.update(action);
+                }
+            }
         }
     }
-    // Terminate terminal
-    let _ = model.terminal.restore();
-}
-
-/// Represents the possible outcomes of handling an event.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AppReturn {
-    Continue,
-    Exit,
-}
-
-pub async fn run(app_data: crate::AppDataHandle) {
-    blocking_start(app_data);
 }
