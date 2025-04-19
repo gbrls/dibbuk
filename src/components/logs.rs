@@ -34,7 +34,7 @@ impl crate::tui::Component for Logs {
                 .block(
                     Block::bordered()
                         .title("logs")
-                        .style(theme::border_focus(focused)),
+                        .border_style(theme::border_focus(focused)),
                 ),
             rect,
         );

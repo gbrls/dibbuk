@@ -24,7 +24,7 @@ impl crate::tui::Component for UserInput {
                 .block(
                     Block::bordered()
                         .title("input")
-                        .style(theme::border_focus(focused)),
+                        .border_style(theme::border_focus(focused)),
                 ),
             rect,
         );

@@ -1,8 +1,7 @@
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-use ratatui::widgets;
+use ratatui::prelude::*;
+use ratatui::widgets::*;
 use std::time::{Duration, SystemTime};
-use tuirealm::command::{Cmd, CmdResult};
-use tuirealm::ratatui::{prelude::*, widgets::*, Frame, Terminal};
 
 pub struct Disasm {
     value: std::collections::HashMap<usize, crate::mi2command::Disassembly>,
@@ -60,7 +59,12 @@ impl crate::tui::Component for Disasm {
 
         let register_table = Table::new(rows, widths)
             .header(header)
-            .block(Block::default().borders(Borders::ALL).title(title.as_str()))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(title.as_str())
+                    .border_style(crate::theme::border_focus(focused)),
+            )
             .column_spacing(2)
             .row_highlight_style(Style::default().reversed());
 

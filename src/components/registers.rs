@@ -1,6 +1,6 @@
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-use ratatui::widgets::*;
 use ratatui::prelude::*;
+use ratatui::widgets::*;
 use std::time::{Duration, SystemTime};
 
 pub struct NRegisters {
@@ -100,7 +100,8 @@ impl crate::tui::Component for NRegisters {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title("Registers (x64)"),
+                    .title("Registers (x64)")
+                    .border_style(crate::theme::border_focus(focused)),
             )
             .column_spacing(2);
 

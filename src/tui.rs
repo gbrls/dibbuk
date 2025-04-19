@@ -1,3 +1,4 @@
+use crate::theme::UILayout;
 use futures_util::{FutureExt, StreamExt};
 use ratatui::crossterm;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
@@ -58,12 +59,38 @@ unsafe impl Sync for Model {}
 
 impl Model {
     fn new(app_data: crate::AppDataHandle) -> Self {
+        use crate::components;
+        let components = [
+            (
+                Id::Help,
+                Arc::new(components::help::Help::new()) as Arc<dyn Component>,
+            ),
+            (
+                Id::GDbUserInput,
+                Arc::new(components::user_input::UserInput::new()) as Arc<dyn Component>,
+            ),
+            (
+                Id::Logs,
+                Arc::new(components::logs::Logs::new()) as Arc<dyn Component>,
+            ),
+            (
+                Id::Registers,
+                Arc::new(components::NRegisters::new()) as Arc<dyn Component>,
+            ), 
+            (
+                Id::Disassembly,
+                Arc::new(components::disasm::Disasm::new()) as Arc<dyn Component>,
+            ),
+        ]
+        .into_iter()
+        .collect();
+
         Model {
             app_data,
             should_quit: false,
             input_mode: InputMode::Insert,
             view_mode: ViewMode::Default,
-            components: HashMap::new(),
+            components,
             focus_stack: Vec::new(),
         }
     }
@@ -136,106 +163,25 @@ impl Model {
         }
     }
 
+    fn view_layout(&mut self, frame: &mut Frame, layout: &UILayout) {
+        let focused = self.focus_stack.last();
+        for (id, rect) in layout.sections.iter() {
+            Arc::get_mut(&mut self.components.get_mut(&id).unwrap())
+                .unwrap()
+                .view(frame, *rect, focused.is_some() && focused.unwrap() == id);
+        }
+    }
+
     fn view(&mut self, frame: &mut Frame, rect: Rect) {
         let focused = self.focus_stack.last();
-        match self.view_mode {
-            ViewMode::Default => {
-                let horizontal_chunks = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints(
-                        [
-                            Constraint::Max(4),         //  input
-                            Constraint::Percentage(80), // logs
-                            Constraint::Max(4),         //  help
-                        ]
-                        .as_ref(),
-                    )
-                    .split(frame.area());
 
-                let vertical_chunks = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints(
-                        [
-                            Constraint::Min(10),        // left
-                            Constraint::Percentage(35), //  regs
-                            Constraint::Percentage(40), //  disasm
-                        ]
-                        .as_ref(),
-                    )
-                    .split(horizontal_chunks[1]);
+        let ui_layout = UILayout::new(frame.area()).base();
+        let ui_layout = match self.view_mode {
+            ViewMode::Default => ui_layout.main(),
+            ViewMode::DebugLogs => ui_layout.fill(Id::Logs),
+        };
 
-                Arc::get_mut(&mut self.components.get_mut(&Id::GDbUserInput).unwrap())
-                    .unwrap()
-                    .view(
-                        frame,
-                        horizontal_chunks[0],
-                        focused.is_some() && focused.unwrap() == &Id::GDbUserInput,
-                    );
-
-                Arc::get_mut(&mut self.components.get_mut(&Id::Logs).unwrap())
-                    .unwrap()
-                    .view(
-                        frame,
-                        vertical_chunks[0],
-                        focused.is_some() && focused.unwrap() == &Id::Logs,
-                    );
-
-                Arc::get_mut(&mut self.components.get_mut(&Id::Registers).unwrap())
-                    .unwrap()
-                    .view(
-                        frame,
-                        vertical_chunks[1],
-                        focused.is_some() && focused.unwrap() == &Id::Registers,
-                    );
-
-                Arc::get_mut(&mut self.components.get_mut(&Id::Disassembly).unwrap())
-                    .unwrap()
-                    .view(
-                        frame,
-                        vertical_chunks[2],
-                        focused.is_some() && focused.unwrap() == &Id::Disassembly,
-                    );
-                Arc::get_mut(&mut self.components.get_mut(&Id::Help).unwrap())
-                    .unwrap()
-                    .view(
-                        frame,
-                        horizontal_chunks[2],
-                        focused.is_some() && focused.unwrap() == &Id::Help,
-                    );
-            }
-            ViewMode::DebugLogs => {
-                let horizontal_chunks = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints(
-                        [
-                            Constraint::Max(4),         //  input
-                            Constraint::Percentage(80), // logs
-                        ]
-                        .as_ref(),
-                    )
-                    .split(frame.area());
-
-                Arc::get_mut(&mut self.components.get_mut(&Id::GDbUserInput).unwrap())
-                    .unwrap()
-                    .view(
-                        frame,
-                        horizontal_chunks[0],
-                        focused.is_some() && focused.unwrap() == &Id::GDbUserInput,
-                    );
-
-                Arc::get_mut(&mut self.components.get_mut(&Id::Logs).unwrap())
-                    .unwrap()
-                    .view(
-                        frame,
-                        horizontal_chunks[1],
-                        focused.is_some() && focused.unwrap() == &Id::Logs,
-                    );
-            } //_ => {}
-        }
-        //frame.render_widget(
-        //    widgets::Paragraph::new(format!("{:?} {:?}", self.view_mode, self.input_mode)),
-        //    rect,
-        //);
+        self.view_layout(frame, &ui_layout);
     }
 
     fn focus(&mut self, id: &Id) {
@@ -278,28 +224,6 @@ async fn main_loop<B: Backend>(app_data_handle: crate::AppDataHandle, mut term: 
     let mut term_event_reader = crossterm::event::EventStream::new();
 
     let mut app_event_rx = model.app_data.channels.event_tx.subscribe();
-
-    model
-        .components
-        .insert(Id::Help, Arc::new(crate::components::help::Help::new()));
-
-    model.components.insert(
-        Id::GDbUserInput,
-        Arc::new(crate::components::user_input::UserInput::new()),
-    );
-
-    model
-        .components
-        .insert(Id::Logs, Arc::new(crate::components::logs::Logs::new()));
-
-    model.components.insert(
-        Id::Registers,
-        Arc::new(crate::components::NRegisters::new()),
-    );
-
-    model
-        .components
-        .insert(Id::Disassembly, Arc::new(crate::components::Disasm::new()));
 
     model.focus(&Id::GDbUserInput);
 
