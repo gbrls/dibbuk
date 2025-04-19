@@ -116,7 +116,7 @@ impl MockComponent for GdbInput {
                 )
                 .unwrap_text_modifiers();
             frame.render_widget(
-                Paragraph::new(text.as_str()).style(Color::Yellow).block(
+                Paragraph::new(text.as_str()).style(Color::Red).block(
                     Block::bordered()
                         .title("input")
                         .border_style(crate::tui::border_config(focus)),
@@ -171,6 +171,7 @@ impl Component<Msg, AppEvent> for GdbInput {
                 } else {
                     self.messages.push(String::new());
                 }
+                println!("{}", self.messages.len());
                 Some(Msg::GdbInput(crate::process::StdinCommand::Input(cmd)))
             }
 

@@ -1,0 +1,61 @@
+use crate::theme;
+use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use ratatui::prelude::*;
+use ratatui::widgets;
+use ratatui::widgets::*;
+
+pub struct UserInput {
+    history: Vec<String>,
+}
+
+impl UserInput {
+    pub fn new() -> Self {
+        UserInput {
+            history: vec![String::from("")],
+        }
+    }
+}
+
+impl crate::ntui::Component for UserInput {
+    fn view(&self, frame: &mut Frame, rect: Rect, focused: bool) {
+        frame.render_widget(
+            Paragraph::new(self.history.last().unwrap().as_str())
+                .style(Color::Red)
+                .block(
+                    Block::bordered()
+                        .title("input")
+                        .style(theme::border_focus(focused)),
+                ),
+            rect,
+        );
+    }
+    fn handle_app_event(&mut self, event: &crate::AppEvent) {}
+    fn handle_terminal_event(&mut self, event: &Event, app_data_handle: &crate::AppDataHandle) {
+        match event {
+            Event::Key(KeyEvent {
+                code: KeyCode::Char(c),
+                modifiers: KeyModifiers::NONE,
+                ..
+            }) => {
+                if self.history.is_empty() {
+                    self.history.push(String::new());
+                }
+
+                self.history.last_mut().unwrap().push(*c);
+            }
+
+            Event::Key(KeyEvent {
+                code: KeyCode::Enter,
+                modifiers: KeyModifiers::NONE,
+                ..
+            }) => {
+                let mut cmd = self.history.last().unwrap().clone();
+                self.history.push(String::new());
+                let tx = crate::process::StdinCommand::Input(cmd);
+                app_data_handle.channels.gdb_stdin_tx.send(tx).unwrap();
+            }
+
+            _ => {}
+        }
+    }
+}

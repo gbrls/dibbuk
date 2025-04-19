@@ -90,6 +90,8 @@ impl MockComponent for Logs {
                     Style::default().dark_gray()
                 } else if l.starts_with("Gdb") {
                     Style::default()
+                } else if l.starts_with("> Input") {
+                    Style::default().red()
                 } else {
                     Style::default().blue()
                 };
@@ -233,6 +235,14 @@ impl Component<Msg, AppEvent> for Logs {
                     self.list_state.select_last();
                     Some(Msg::Empty)
                 }
+
+                Event::User(AppEvent::Log(s)) => {
+                    self.logs
+                        .push(format!("{}", s.replace("\n", "").replace("\t", " ")));
+                    self.list_state.select_last();
+                    Some(Msg::Empty)
+                }
+
                 Event::User(app_event) => {
                     match self.view_mode {
                         LogsMode::Verbose => {
