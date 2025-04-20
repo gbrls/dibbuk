@@ -30,6 +30,7 @@ impl crate::tui::Component for UserInput {
         );
     }
     fn handle_app_event(&mut self, event: &crate::AppEvent) {}
+    fn handle_ui_event(&mut self, event: &crate::tui::UiEvent) {}
     fn handle_terminal_event(&mut self, event: &Event, app_data_handle: &crate::AppDataHandle) {
         match event {
             Event::Key(KeyEvent {
@@ -56,8 +57,13 @@ impl crate::tui::Component for UserInput {
                     self.history.push(String::new());
                 }
 
-                let tx = crate::process::StdinCommand::Input(cmd);
+                let tx = crate::process::StdinCommand::Input(cmd.clone());
                 app_data_handle.channels.gdb_stdin_tx.send(tx).unwrap();
+                app_data_handle
+                    .channels
+                    .event_tx
+                    .send(crate::AppEvent::Log(cmd))
+                    .unwrap();
             }
 
             Event::Key(KeyEvent {

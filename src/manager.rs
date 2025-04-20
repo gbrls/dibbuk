@@ -13,7 +13,7 @@ pub async fn run(mut data: crate::AppDataHandle) {
                     data.channels.gdb_stdin_tx.send(GetRegisterUpdates).unwrap();
                     data.channels
                         .gdb_stdin_tx
-                        .send(GetDisassemblyRel(0, 32))
+                        .send(GetDisassemblyRel(32, 128))
                         .unwrap();
                 }
                 Gdb(UpdatedRegisters(ids)) => {

@@ -29,12 +29,16 @@ impl crate::tui::Component for Disasm {
             .height(1)
             .bottom_margin(1);
 
-        let mut rows: Vec<_> = self.value.iter().collect();
-        rows.sort_by(|(addr0, asm0), (addr1, asm1)| addr0.cmp(addr1));
+        let mut addrs: Vec<_> = self
+            .value
+            .iter()
+            .filter(|(addr, _)| addr.abs_diff(self.instruction_pointer.unwrap_or(0) as usize) < 64)
+            .collect();
+        addrs.sort_by(|(addr0, asm0), (addr1, asm1)| addr0.cmp(addr1));
 
         let selected = {
             let mut ret = None;
-            for (i, (addr, _)) in rows.iter().enumerate() {
+            for (i, (addr, _)) in addrs.iter().enumerate() {
                 if (self.instruction_pointer.unwrap_or(0) as usize) == **addr {
                     ret = Some(i);
                 }
@@ -42,12 +46,19 @@ impl crate::tui::Component for Disasm {
             ret
         };
 
-        let rows = rows.iter().map(|(addr, disasm)| {
+        let rows = addrs.iter().map(|(addr, disasm)| {
             let formatted_value = format!("{}", disasm.str);
             let fmt_addr = format!("{:#018x} {}+{:#05x}", addr, disasm.func, disasm.offset);
 
+            let style = match self.instruction_pointer {
+                Some(rip) if rip as usize > **addr => Style::default().dark_gray(),
+                Some(rip) if rip as usize == **addr => Style::default().yellow(),
+                Some(_) => Style::default().white(),
+                None => Style::default(),
+            };
+
             let cells = vec![Cell::from(fmt_addr), Cell::from(formatted_value)];
-            Row::new(cells).height(1)
+            Row::new(cells).height(1).style(style)
         });
 
         let widths = [Constraint::Min(8), Constraint::Min(20)];
@@ -66,7 +77,7 @@ impl crate::tui::Component for Disasm {
                     .border_style(crate::theme::border_focus(focused)),
             )
             .column_spacing(2)
-            .row_highlight_style(Style::default().reversed());
+            .row_highlight_style(Style::default().bold());
 
         let mut table_state = ratatui::widgets::TableState::default().with_selected(selected);
         frame.render_stateful_widget(register_table, rect, &mut table_state)
@@ -91,4 +102,5 @@ impl crate::tui::Component for Disasm {
         }
     }
     fn handle_terminal_event(&mut self, event: &Event, app_data_handle: &crate::AppDataHandle) {}
+    fn handle_ui_event(&mut self, event: &crate::tui::UiEvent) {}
 }

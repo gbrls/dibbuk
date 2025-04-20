@@ -12,7 +12,7 @@ use std::time::Duration;
 use tokio::{select, time};
 
 #[derive(Debug, Copy, Clone, Hash)]
-pub enum ModelAction {
+pub enum UiEvent {
     Quit,
     ChangeInputMode(InputMode),
     ChangeViewMode(ViewMode),
@@ -22,6 +22,13 @@ pub enum ModelAction {
 pub enum InputMode {
     Insert,
     Normal,
+    Navigation,
+}
+
+impl Default for InputMode {
+    fn default() -> Self {
+        InputMode::Insert
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -30,10 +37,17 @@ pub enum ViewMode {
     DebugLogs,
 }
 
+impl Default for ViewMode {
+    fn default() -> Self {
+        ViewMode::Default
+    }
+}
+
 pub trait Component {
     fn view(&mut self, frame: &mut Frame, rect: Rect, focused: bool);
     fn handle_terminal_event(&mut self, event: &Event, app_data_handle: &crate::AppDataHandle);
     fn handle_app_event(&mut self, event: &crate::AppEvent);
+    fn handle_ui_event(&mut self, event: &UiEvent);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -76,7 +90,7 @@ impl Model {
             (
                 Id::Registers,
                 Arc::new(components::NRegisters::new()) as Arc<dyn Component>,
-            ), 
+            ),
             (
                 Id::Disassembly,
                 Arc::new(components::disasm::Disasm::new()) as Arc<dyn Component>,
@@ -88,15 +102,15 @@ impl Model {
         Model {
             app_data,
             should_quit: false,
-            input_mode: InputMode::Insert,
-            view_mode: ViewMode::Default,
+            input_mode: InputMode::default(),
+            view_mode: ViewMode::default(),
             components,
             focus_stack: Vec::new(),
         }
     }
 
     /// Only updates the focused element with input from terminal
-    fn handle_terminal_event(&mut self, event: Event) -> Option<ModelAction> {
+    fn handle_terminal_event(&mut self, event: Event) -> Option<UiEvent> {
         let focused = self.focus_stack.last();
         match event {
             Event::Key(KeyEvent {
@@ -116,7 +130,7 @@ impl Model {
     }
 
     /// Updates all elements
-    fn handle_app_event(&mut self, event: crate::AppEvent) -> Option<ModelAction> {
+    fn handle_app_event(&mut self, event: crate::AppEvent) -> Option<UiEvent> {
         for (id, mut component) in self.components.iter_mut() {
             Arc::get_mut(&mut component)
                 .unwrap()
@@ -125,41 +139,93 @@ impl Model {
         None
     }
 
-    fn keybind(&self, code: KeyCode, modifiers: KeyModifiers) -> Option<ModelAction> {
+    fn keybind(&self, code: KeyCode, modifiers: KeyModifiers) -> Option<UiEvent> {
         use InputMode::*;
-        use ModelAction::*;
+        use UiEvent::*;
         match (self.input_mode, code, modifiers) {
             (Normal, KeyCode::Char('q'), _) => Some(Quit),
             (Normal, KeyCode::Char('i'), _) => Some(ChangeInputMode(Insert)),
+            (Normal, KeyCode::Char('v'), _) => Some(ChangeInputMode(Navigation)),
 
             (Normal, KeyCode::Char('0'), _) => Some(ChangeViewMode(ViewMode::DebugLogs)),
             (Normal, KeyCode::Char('1'), _) => Some(ChangeViewMode(ViewMode::Default)),
 
             (Insert, KeyCode::Esc, _) => Some(ChangeInputMode(Normal)),
+            (Navigation, KeyCode::Esc, _) => Some(ChangeInputMode(Normal)),
+
+            (Navigation, KeyCode::Char('j'), _) => {
+                self.app_data
+                    .channels
+                    .gdb_stdin_tx
+                    .send(crate::process::StdinCommand::NextInstruction)
+                    .unwrap();
+
+                None
+            }
+            (Navigation, KeyCode::Char('l'), _) => {
+                self.app_data
+                    .channels
+                    .gdb_stdin_tx
+                    .send(crate::process::StdinCommand::StepInstruction)
+                    .unwrap();
+
+                None
+            }
+            (Navigation, KeyCode::Char('h'), _) => {
+                self.app_data
+                    .channels
+                    .gdb_stdin_tx
+                    .send(crate::process::StdinCommand::Finish)
+                    .unwrap();
+
+                None
+            }
+            (Navigation, KeyCode::Enter, _) => {
+                self.app_data
+                    .channels
+                    .gdb_stdin_tx
+                    .send(crate::process::StdinCommand::Continue)
+                    .unwrap();
+
+                None
+            }
+
             _ => None,
         }
     }
 
-    fn update(&mut self, action: ModelAction) {
+    fn update(&mut self, action: UiEvent) {
         match action {
-            ModelAction::Quit => {
+            UiEvent::Quit => {
                 self.should_quit = true;
             }
-            ModelAction::ChangeInputMode(InputMode::Insert) => {
+            UiEvent::ChangeInputMode(InputMode::Insert) => {
                 self.input_mode = InputMode::Insert;
                 self.unfocus();
                 self.focus(&Id::GDbUserInput);
             }
 
-            ModelAction::ChangeInputMode(InputMode::Normal) => {
+            UiEvent::ChangeInputMode(InputMode::Navigation) => {
+                self.input_mode = InputMode::Navigation;
+                self.unfocus();
+                self.focus(&Id::Disassembly);
+            }
+
+            UiEvent::ChangeInputMode(InputMode::Normal) => {
                 self.input_mode = InputMode::Normal;
                 self.unfocus();
                 self.focus(&Id::Logs);
             }
 
-            ModelAction::ChangeViewMode(mode) => {
+            UiEvent::ChangeViewMode(mode) => {
                 self.view_mode = mode;
             }
+        }
+
+        for (id, mut component) in self.components.iter_mut() {
+            Arc::get_mut(&mut component)
+                .unwrap()
+                .handle_ui_event(&action);
         }
     }
 
@@ -192,11 +258,7 @@ impl Model {
     }
 
     fn unfocus(&mut self) -> Option<Id> {
-        if !self.focus_stack.is_empty() {
-            self.focus_stack.pop()
-        } else {
-            None
-        }
+        self.focus_stack.pop()
     }
 }
 
@@ -210,7 +272,6 @@ pub async fn run(app_data_handle: crate::AppDataHandle) {
     stdout().execute(EnterAlternateScreen).unwrap();
     crossterm::terminal::enable_raw_mode().unwrap();
 
-    //time::sleep(std::time::Duration::from_millis(1000)).await;
     main_loop(app_data_handle, terminal).await;
 
     // cleanup

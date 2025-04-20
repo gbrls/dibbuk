@@ -44,7 +44,7 @@ impl crate::tui::Component for Logs {
                 Style::default().dark_gray()
             } else if l.starts_with("Gdb") {
                 Style::default()
-            } else if l.starts_with("> Input") {
+            } else if l.starts_with("~>") {
                 Style::default().red()
             } else {
                 Style::default().blue()
@@ -76,9 +76,15 @@ impl crate::tui::Component for Logs {
                 self.list_state.select_last();
             }
 
-            app_event => match self.view_mode {
+            crate::AppEvent::Log(log) => {
+                self.history.push(String::new());
+                self.history.push(format!("~> {}", log));
+                self.list_state.select_last();
+            }
+
+            any => match self.view_mode {
                 LogsMode::Verbose => {
-                    self.history.push(format!("{:?}", app_event));
+                    self.history.push(format!("{:?}", any));
                     self.list_state.select_last();
                 }
                 _ => {}
@@ -102,4 +108,6 @@ impl crate::tui::Component for Logs {
             _ => {}
         }
     }
+
+    fn handle_ui_event(&mut self, event: &crate::tui::UiEvent) {}
 }

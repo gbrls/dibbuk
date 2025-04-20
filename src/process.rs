@@ -38,6 +38,9 @@ pub enum StdinCommand {
     AddBreakpoint(String),
     Input(String),
     StepInstruction,
+    NextInstruction,
+    Finish,
+    Continue,
     Run,
     GetRegisterNames,
     GetAllRegisterValues,
@@ -117,7 +120,7 @@ pub async fn run_event_loop(
     stdout_tx: tokio::sync::broadcast::Sender<MiOutput>,
     app_data: crate::AppDataHandle,
 ) {
-    println!("[Proxy Setup] Attempting to spawn GDB...");
+    eprintln!("[Proxy Setup] Attempting to spawn GDB...");
 
     let cli_args = {
         let handle = app_data.state.read().await;
@@ -139,13 +142,13 @@ pub async fn run_event_loop(
         }
     };
 
-    println!(
+    eprintln!(
         "[Proxy Info] GDB spawned (PID: {}). Proxying I/O now.",
         gdb_io.child_process.id().unwrap_or(0)
     );
-    println!("[Proxy Info] Type GDB MI commands below.");
-    println!("[Proxy Info] Type ':quit' (and press Enter) to exit the proxy cleanly.");
-    println!("--- GDB MI Proxy Start ---");
+    eprintln!("[Proxy Info] Type GDB MI commands below.");
+    eprintln!("[Proxy Info] Type ':quit' (and press Enter) to exit the proxy cleanly.");
+    eprintln!("--- GDB MI Proxy Start ---");
 
     // --- Task 1: Forward GDB stdout to terminal stdout ---
     // We need to move the reader into the spawned task
@@ -228,7 +231,7 @@ pub async fn run_event_loop(
     });
 
     // --- Cleanup ---
-    println!("[Proxy Info] Input loop exited. Waiting for GDB process to terminate...");
+    eprintln!("[Proxy Info] Input loop exited. Waiting for GDB process to terminate...");
 
     // Optional: Give GDB a moment to process the exit command before forceful measures
     // tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -241,7 +244,7 @@ pub async fn run_event_loop(
 
     // Wait for the stdout/stderr forwarding tasks to complete.
     // They should complete naturally when GDB closes its output streams upon exiting.
-    println!("[Proxy Info] Waiting for I/O tasks to finish...");
+    eprintln!("[Proxy Info] Waiting for I/O tasks to finish...");
     let (stdout_res, stderr_res, stdin_res) =
         tokio::join!(stdout_handle, stderr_handle, stdin_handle);
 
@@ -256,7 +259,7 @@ pub async fn run_event_loop(
         eprintln!("[Proxy Warning] Stdin task panicked or failed: {}", e);
     }
 
-    println!("--- GDB MI Proxy End ---");
+    eprintln!("--- GDB MI Proxy End ---");
 }
 
 async fn gdb_commands_loop(mut gdb_stdin: ChildStdin, mut cmd_rx: UnboundedReceiver<StdinCommand>) {
@@ -266,6 +269,9 @@ async fn gdb_commands_loop(mut gdb_stdin: ChildStdin, mut cmd_rx: UnboundedRecei
             AddBreakpoint(loc) => format!("-break-insert {}", loc),
             Run => "-exec-run".into(),
             StepInstruction => "-exec-step-instruction".into(),
+            NextInstruction => "-exec-next-instruction".into(),
+            Finish => "-exec-finish".into(),
+            Continue => "-exec-continue".into(),
             GetRegisterNames => "-data-list-register-names".into(),
             GetAllRegisterValues => "-data-list-register-values x".into(),
             GetRegisterValues(ids) => {
@@ -280,9 +286,7 @@ async fn gdb_commands_loop(mut gdb_stdin: ChildStdin, mut cmd_rx: UnboundedRecei
                 format!("-data-disassemble -s \"$pc-{}\" -e \"$pc+{}\"", start, end)
             }
             Quit => "exit".into(),
-            Input(s) => {
-                s
-            }
+            Input(s) => s,
             _ => todo!("ops..."),
         };
         cmd_ascii.push('\n');

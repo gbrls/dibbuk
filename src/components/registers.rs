@@ -129,4 +129,6 @@ impl crate::tui::Component for NRegisters {
             _ => {}
         }
     }
+
+    fn handle_ui_event(&mut self, event: &crate::tui::UiEvent) {}
 }

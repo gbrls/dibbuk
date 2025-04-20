@@ -36,8 +36,8 @@ impl UILayout {
             .constraints(
                 [
                     Constraint::Max(3),         // input
-                    Constraint::Percentage(80), // ...
-                    Constraint::Max(3),         // statusbar
+                    Constraint::Percentage(92), // ...
+                    Constraint::Max(1),         // statusbar
                 ]
                 .as_ref(),
             )
@@ -47,7 +47,7 @@ impl UILayout {
         sections.insert(Id::Help, chunks[2]);
         unused.push(chunks[1]);
 
-        UILayout { unused, sections }
+        UILayout { unused, sections }.add_blank(Id::Help)
     }
 
     pub fn main(self) -> Self {
@@ -59,17 +59,27 @@ impl UILayout {
             .direction(Direction::Horizontal)
             .constraints(
                 [
-                    Constraint::Min(10),        // left
-                    Constraint::Percentage(35), //  regs
-                    Constraint::Percentage(40), //  disasm
+                    Constraint::Percentage(55), //  disasm
+                    Constraint::Percentage(45), //  regs / logs
                 ]
                 .as_ref(),
             )
             .split(root);
 
-        sections.insert(Id::Logs, chunks[0]);
-        sections.insert(Id::Registers, chunks[1]);
-        sections.insert(Id::Disassembly, chunks[2]);
+        let vchunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(
+                [
+                    Constraint::Percentage(50), //  regs
+                    Constraint::Percentage(50), //  logs
+                ]
+                .as_ref(),
+            )
+            .split(chunks[1]);
+
+        sections.insert(Id::Disassembly, chunks[0]);
+        sections.insert(Id::Registers, vchunks[0]);
+        sections.insert(Id::Logs, vchunks[1]);
 
         UILayout { unused, sections }
     }
@@ -80,6 +90,22 @@ impl UILayout {
         let root = unused.pop().unwrap();
 
         sections.insert(id, root);
+
+        UILayout { unused, sections }
+    }
+
+    pub fn add_blank(self, id: Id) -> Self {
+        let mut unused = self.unused;
+        let mut sections = self.sections;
+
+        let rect = sections.get(&id).unwrap();
+
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Max(20), Constraint::Percentage(80)].as_ref())
+            .split(*rect);
+
+        sections.insert(id, chunks[0]);
 
         UILayout { unused, sections }
     }
