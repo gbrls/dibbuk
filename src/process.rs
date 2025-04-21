@@ -39,6 +39,7 @@ pub enum StdinCommand {
     Input(String),
     StepInstruction,
     NextInstruction,
+    ListStackFrames,
     Finish,
     Continue,
     Run,
@@ -172,7 +173,7 @@ pub async fn run_event_loop(
                             string: OutputKind::Stdout(line_buf.clone()),
                             mi: match parser::parse_mi_line(&line_buf) {
                                 Err(e) => {
-                                    eprintln!("!!! {:?} -> {:?} !!!", &line_buf, e);
+                                    eprintln!("!!! error parsing {:?} -> {:?} !!!", &line_buf, e);
                                     None
                                 }
                                 Ok((s, rec)) => Some(rec),
@@ -272,6 +273,7 @@ async fn gdb_commands_loop(mut gdb_stdin: ChildStdin, mut cmd_rx: UnboundedRecei
             NextInstruction => "-exec-next-instruction".into(),
             Finish => "-exec-finish".into(),
             Continue => "-exec-continue".into(),
+            ListStackFrames => "-stack-list-frames".into(),
             GetRegisterNames => "-data-list-register-names".into(),
             GetAllRegisterValues => "-data-list-register-values x".into(),
             GetRegisterValues(ids) => {

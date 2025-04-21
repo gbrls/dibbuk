@@ -28,17 +28,6 @@ impl Logs {
 
 impl crate::tui::Component for Logs {
     fn view(&mut self, frame: &mut Frame, rect: Rect, focused: bool) {
-        frame.render_widget(
-            Paragraph::new(format!("{:#?}", self.history))
-                .style(Color::Blue)
-                .block(
-                    Block::bordered()
-                        .title("logs")
-                        .border_style(theme::border_focus(focused)),
-                ),
-            rect,
-        );
-
         let lines = self.history.iter().enumerate().map(|(i, l)| {
             let style = if l.starts_with("GdbMi") {
                 Style::default().dark_gray()

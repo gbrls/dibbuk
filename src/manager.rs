@@ -11,10 +11,13 @@ pub async fn run(mut data: crate::AppDataHandle) {
             match cmd {
                 Gdb(StateUpdate(GdbState::Stopped)) => {
                     data.channels.gdb_stdin_tx.send(GetRegisterUpdates).unwrap();
+
                     data.channels
                         .gdb_stdin_tx
                         .send(GetDisassemblyRel(32, 128))
                         .unwrap();
+
+                    data.channels.gdb_stdin_tx.send(ListStackFrames).unwrap();
                 }
                 Gdb(UpdatedRegisters(ids)) => {
                     data.channels

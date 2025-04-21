@@ -43,6 +43,15 @@ impl PartialOrd for MemMap {
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq)]
+pub struct StackFrame {
+    depth: u64,
+    addr: u64,
+    function: Option<String>,
+    file: Option<String>,
+    line: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq)]
 pub enum GdbMessage {
     Pid(u64),
     Maps(Vec<MemMap>),
@@ -50,6 +59,7 @@ pub enum GdbMessage {
     UpdatedRegisters(Vec<usize>),
     StateUpdate(GdbState),
     DisassemblyNative(Vec<Disassembly>),
+    StackFrames(Vec<StackFrame>),
 }
 
 //TODO: refactor with generics to handle other architectures
@@ -317,6 +327,77 @@ pub async fn run(mut data: crate::AppDataHandle) {
                     }
                 }
 
+                Some(MiRecord::Result(ResultRecord { results, .. }))
+                    if results.contains_key("stack") =>
+                {
+                    let stack = results.get("stack").unwrap();
+                    if let MiValue::List(tuple_list) = stack {
+                        let mut frames = Vec::new();
+                        for tpl in tuple_list {
+                            if let MiValue::Tuple(tpl) = tpl {
+                                for (k, v) in tpl {
+                                    match (k, v) {
+                                        (v, MiValue::Tuple(frame_info)) => {
+                                            let mut line = None;
+                                            let mut file = None;
+                                            let mut addr = None;
+                                            let mut function = None;
+                                            let mut depth = None;
+                                            for (k, v) in frame_info {
+                                                match v {
+                                                    MiValue::Const(level) if k == "level" => {
+                                                        depth = level.as_str().parse::<u64>().ok();
+                                                    }
+                                                    MiValue::Const(adr) if k == "addr" => {
+                                                        addr = u64::from_str_radix(
+                                                            adr.as_str()
+                                                                .strip_prefix("0x")
+                                                                .unwrap_or(""),
+                                                            16,
+                                                        )
+                                                        .ok();
+                                                    }
+                                                    MiValue::Const(f) if k == "func" => {
+                                                        function = Some(f);
+                                                    }
+                                                    MiValue::Const(f) if k == "fullname" => {
+                                                        file = Some(f);
+                                                    }
+                                                    MiValue::Const(l) if k == "line" => {
+                                                        line = l.as_str().parse::<u64>().ok();
+                                                    }
+                                                    _ => {}
+                                                }
+                                            }
+
+                                            match (depth, addr) {
+                                                (Some(depth), Some(addr)) => {
+                                                    let frame = StackFrame {
+                                                        addr,
+                                                        depth,
+                                                        line,
+                                                        function: function.cloned(),
+                                                        file: file.cloned(),
+                                                    };
+                                                    frames.push(frame);
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+
+                        if !frames.is_empty() {
+                            data.channels
+                                .event_tx
+                                .send(crate::AppEvent::Gdb(GdbMessage::StackFrames(frames)))
+                                .unwrap();
+                        }
+                    }
+                }
                 Some(mi) => {
                     data.channels.event_tx.send(GdbMi(mi)).unwrap();
                 }
