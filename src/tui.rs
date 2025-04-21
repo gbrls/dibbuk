@@ -7,8 +7,10 @@ use ratatui::crossterm::ExecutableCommand;
 use ratatui::prelude::*;
 use ratatui::widgets;
 use std::collections::HashMap;
+use std::ops::DerefMut;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use tachyonfx::EffectRenderer;
 use tokio::{select, time};
 
 #[derive(Debug, Copy, Clone, Hash)]
@@ -284,7 +286,13 @@ async fn main_loop<B: Backend>(app_data_handle: crate::AppDataHandle, mut term: 
     let mut model = Model::new(app_data_handle);
     let mut term_event_reader = crossterm::event::EventStream::new();
 
+    let mut last_draw = Instant::now();
+
     let mut app_event_rx = model.app_data.channels.event_tx.subscribe();
+    let mut fx = tachyonfx::fx::coalesce(tachyonfx::EffectTimer::from_ms(
+        800,
+        tachyonfx::Interpolation::ExpoIn,
+    ));
 
     model.focus(&Id::GDbUserInput);
 
@@ -295,11 +303,14 @@ async fn main_loop<B: Backend>(app_data_handle: crate::AppDataHandle, mut term: 
             _ = tick => {
                 term.draw(|f| {
                     model.view(f, f.area());
+                    f.render_effect(&mut fx, f.area(), last_draw.elapsed().into());
+                    last_draw = Instant::now();
                 });
             }
             Some(Ok(term_event)) = term_event => {
                 if let Some(action) = model.handle_terminal_event(term_event) {
                     model.update(action);
+
                 }
             }
             Ok(event) = app_event_rx.recv().fuse() => {

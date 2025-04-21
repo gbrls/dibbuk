@@ -24,7 +24,7 @@ impl crate::tui::Component for Help {
         let input_mode_color = match self.input_mode {
             InputMode::Insert => Color::Red,
             InputMode::Normal => Color::Blue,
-            InputMode::Navigation => Color::LightGreen,
+            InputMode::Navigation => Color::Green,
         };
 
         frame.render_widget(

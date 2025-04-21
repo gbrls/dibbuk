@@ -2,10 +2,10 @@ mod components;
 mod elf;
 mod manager;
 mod mi2command;
-mod tui;
 mod parser;
 mod process;
 mod theme;
+mod tui;
 
 use mi2command::GdbContext;
 use mi2command::GdbMessage;
@@ -190,9 +190,8 @@ async fn main() {
     let app_handle = tokio::spawn(mi2command::run(app.data_handle()));
     let mgr_handle = tokio::spawn(manager::run(app.data_handle()));
 
-    let local = tokio::task::LocalSet::new();
+    //let local = tokio::task::LocalSet::new();
     //let tui_handle = local.spawn_local(tui::run(app.data_handle())); // WARN: never yielded
-    //let tui_handle = tokio::spawn(tui::run(app.data_handle())); // WARN: never yielded
     let tui_handle = tokio::spawn(tui::run(app.data_handle())); // WARN: never yielded
 
     // 4. Shutdown handler
