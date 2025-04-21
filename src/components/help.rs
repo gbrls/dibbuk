@@ -28,9 +28,10 @@ impl crate::tui::Component for Help {
         };
 
         frame.render_widget(
-            widgets::Paragraph::new(format!("[{:?}] : {:?}", self.input_mode, self.view_mode))
-                .style(Style::default().fg(Color::Black).bold())
-                .bg(input_mode_color),
+            Line::from(vec![
+                Span::from(format!(" {:?} ", self.input_mode)).style(Style::default().fg(Color::Black).bg(input_mode_color)),
+                Span::from(format!(" | {:?}", self.view_mode)),
+            ]),
             rect,
         );
     }

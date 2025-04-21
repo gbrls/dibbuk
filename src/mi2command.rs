@@ -44,11 +44,11 @@ impl PartialOrd for MemMap {
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq)]
 pub struct StackFrame {
-    depth: u64,
-    addr: u64,
-    function: Option<String>,
-    file: Option<String>,
-    line: Option<u64>,
+    pub depth: u64,
+    pub addr: u64,
+    pub function: Option<String>,
+    pub file: Option<String>,
+    pub line: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq)]

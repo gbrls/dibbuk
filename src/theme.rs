@@ -47,7 +47,7 @@ impl UILayout {
         sections.insert(Id::Help, chunks[2]);
         unused.push(chunks[1]);
 
-        UILayout { unused, sections }.add_blank(Id::Help)
+        UILayout { unused, sections }
     }
 
     pub fn main(self) -> Self {
@@ -66,7 +66,7 @@ impl UILayout {
             )
             .split(root);
 
-        let vchunks = Layout::default()
+        let vchunks_right = Layout::default()
             .direction(Direction::Vertical)
             .constraints(
                 [
@@ -77,9 +77,21 @@ impl UILayout {
             )
             .split(chunks[1]);
 
-        sections.insert(Id::Disassembly, chunks[0]);
-        sections.insert(Id::Registers, vchunks[0]);
-        sections.insert(Id::Logs, vchunks[1]);
+        let vchunks_left = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(
+                [
+                    Constraint::Percentage(85), //  disasm
+                    Constraint::Percentage(15), //  bt
+                ]
+                .as_ref(),
+            )
+            .split(chunks[0]);
+
+        sections.insert(Id::Disassembly, vchunks_left[0]);
+        sections.insert(Id::Callstack, vchunks_left[1]);
+        sections.insert(Id::Registers, vchunks_right[0]);
+        sections.insert(Id::Logs, vchunks_right[1]);
 
         UILayout { unused, sections }
     }

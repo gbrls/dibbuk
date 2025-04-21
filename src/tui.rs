@@ -60,6 +60,7 @@ pub enum Id {
     Disassembly,
     Welcome,
     GDbUserInput,
+    Callstack,
 }
 
 struct Model {
@@ -96,6 +97,10 @@ impl Model {
             (
                 Id::Disassembly,
                 Arc::new(components::disasm::Disasm::new()) as Arc<dyn Component>,
+            ),
+            (
+                Id::Callstack,
+                Arc::new(components::CallStack::new()) as Arc<dyn Component>,
             ),
         ]
         .into_iter()
@@ -291,7 +296,7 @@ async fn main_loop<B: Backend>(app_data_handle: crate::AppDataHandle, mut term: 
     let mut app_event_rx = model.app_data.channels.event_tx.subscribe();
     let mut fx = tachyonfx::fx::coalesce(tachyonfx::EffectTimer::from_ms(
         800,
-        tachyonfx::Interpolation::ExpoIn,
+        tachyonfx::Interpolation::ExpoOut,
     ));
 
     model.focus(&Id::GDbUserInput);
