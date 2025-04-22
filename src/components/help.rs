@@ -1,3 +1,4 @@
+use crate::process_ui::ProcessState;
 use crate::tui::{InputMode, ViewMode};
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::prelude::*;
@@ -20,7 +21,7 @@ impl Help {
 }
 
 impl crate::tui::Component for Help {
-    fn view(&mut self, frame: &mut Frame, rect: Rect, focused: bool) {
+    fn view(&mut self, process: &ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
         let input_mode_color = match self.input_mode {
             InputMode::Insert => Color::Red,
             InputMode::Normal => Color::Blue,
@@ -29,7 +30,8 @@ impl crate::tui::Component for Help {
 
         frame.render_widget(
             Line::from(vec![
-                Span::from(format!(" {:?} ", self.input_mode)).style(Style::default().fg(Color::Black).bg(input_mode_color)),
+                Span::from(format!(" {:?} ", self.input_mode))
+                    .style(Style::default().fg(Color::Black).bg(input_mode_color)),
                 Span::from(format!(" | {:?}", self.view_mode)),
             ]),
             rect,
@@ -52,7 +54,12 @@ impl crate::tui::Component for Help {
             _ => {}
         }
     }
-    fn handle_app_event(&mut self, event: &crate::AppEvent) {}
+    fn handle_app_event(
+        &mut self,
+        event: &crate::AppEvent,
+        app_data_handle: &crate::AppDataHandle,
+    ) {
+    }
     fn handle_ui_event(&mut self, event: &crate::tui::UiEvent) {
         match event {
             crate::tui::UiEvent::ChangeInputMode(input_mode) => {

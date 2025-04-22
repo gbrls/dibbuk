@@ -1,11 +1,20 @@
 // -thread-info -> pid -> /proc/pid/maps
 use proc_maps::get_process_maps;
+use read_process_memory::CopyAddress;
+
+fn read64(pid: u64, addr: u64, size: u64) -> Vec<u8> {
+    let h: read_process_memory::ProcessHandle = (pid as i32).try_into().unwrap();
+    read_process_memory::copy_address(addr as usize, size as usize, &h).unwrap()
+}
 
 pub async fn run(mut data: crate::AppDataHandle) {
     use crate::mi2command::GdbMessage::*;
     use crate::mi2command::GdbState;
     use crate::process::StdinCommand::*;
     use crate::AppEvent::*;
+
+    let mut main_pid = None;
+
     loop {
         while let Ok(cmd) = data.channels.event_rx.recv().await {
             match cmd {
@@ -18,6 +27,20 @@ pub async fn run(mut data: crate::AppDataHandle) {
                         .unwrap();
 
                     data.channels.gdb_stdin_tx.send(ListStackFrames).unwrap();
+
+                    if main_pid.is_some() {
+                        let pid = main_pid.unwrap();
+                        if let Ok(maps) = get_process_maps(pid as i32) {
+                            data.channels
+                                .event_tx
+                                .send(Gdb(Maps(
+                                    maps.into_iter()
+                                        .map(|m| crate::mi2command::MemMap { map_range: m })
+                                        .collect(),
+                                )))
+                                .unwrap();
+                        }
+                    }
                 }
                 Gdb(UpdatedRegisters(ids)) => {
                     data.channels
@@ -26,6 +49,7 @@ pub async fn run(mut data: crate::AppDataHandle) {
                         .unwrap();
                 }
                 Gdb(Pid(pid)) => {
+                    main_pid = Some(pid);
                     if let Ok(maps) = get_process_maps(pid as i32) {
                         data.channels
                             .event_tx
@@ -34,6 +58,16 @@ pub async fn run(mut data: crate::AppDataHandle) {
                                     .map(|m| crate::mi2command::MemMap { map_range: m })
                                     .collect(),
                             )))
+                            .unwrap();
+                    }
+                }
+                ReadMemory(addr, size) => {
+                    if let Some(pid) = main_pid {
+                        let mem = read64(pid, addr, size);
+
+                        data.channels
+                            .event_tx
+                            .send(crate::AppEvent::Memory(addr, mem))
                             .unwrap();
                     }
                 }

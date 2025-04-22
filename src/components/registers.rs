@@ -1,26 +1,23 @@
+use crate::process_ui::ProcessState;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::prelude::*;
 use ratatui::widgets::*;
 use std::time::{Duration, SystemTime};
 
-pub struct NRegisters {
-    value: std::collections::HashMap<String, u64>,
-    memory_maps: Vec<crate::mi2command::MemMap>,
-}
+pub struct NRegisters {}
 impl NRegisters {
     pub fn new() -> Self {
-        NRegisters {
-            value: std::collections::HashMap::new(),
-            memory_maps: Vec::new(),
-        }
+        NRegisters {}
     }
 }
 
 impl crate::tui::Component for NRegisters {
-    fn view(&mut self, frame: &mut Frame, rect: Rect, focused: bool) {
-        let register_names = self.value.keys();
-        let state_message =
-            Paragraph::new(format!("rip -> {:#x}", self.value.get("rip").unwrap_or(&0)));
+    fn view(&mut self, process: &ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
+        let register_names = process.registers.keys();
+        let state_message = Paragraph::new(format!(
+            "rip -> {:#x}",
+            process.registers.get("rip").unwrap_or(&0)
+        ));
 
         let common_x64_registers = [
             "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp", "r8", "r9", "r10", "r11",
@@ -37,49 +34,36 @@ impl crate::tui::Component for NRegisters {
             .bottom_margin(1);
 
         let rows = common_x64_registers.iter().map(|&reg_name| {
-            let value = self.value.get(reg_name).copied().unwrap_or(0);
+            let value_or_addr = process.registers.get(reg_name).copied().unwrap_or(0);
 
-            let maybe_range = self.memory_maps.iter().find(|map| {
-                let value = value as usize;
-                value >= map.map_range.start()
-                    && (value < map.map_range.start() + map.map_range.size())
-            });
-
-            let style = if maybe_range.is_some() {
-                let r = maybe_range.unwrap().map_range.is_read();
-                let w = maybe_range.unwrap().map_range.is_write();
-                let x = maybe_range.unwrap().map_range.is_exec();
-                match (r, w, x) {
-                    (true, true, true) => Style::default().bold().red(),
-                    (true, true, false) => Style::default().blue(),
-                    (true, false, true) => Style::default().yellow().bold(),
-                    (true, false, false) => Style::default().dark_gray(),
-                    _ => Style::default(),
-                }
-            } else {
-                Style::default()
+            let maybe_range = process.addr_memory_map(value_or_addr);
+            let style = match process.addr_memory_perm(value_or_addr) {
+                Some((r, w, x)) => crate::theme::memory_permissions(r, w, x),
+                None => Style::default(),
             };
 
-            let formatted_value = format!("{:#018x}", value);
-            let mem =
-                if maybe_range.is_some() && maybe_range.unwrap().map_range.filename().is_some() {
-                    format!(
-                        "{} {} +{:#04x}",
-                        maybe_range.unwrap().map_range.flags,
-                        maybe_range
-                            .unwrap()
-                            .map_range
-                            .filename()
-                            .unwrap()
-                            .file_stem()
-                            .unwrap()
-                            .to_str()
-                            .unwrap(),
-                        (value as usize) - maybe_range.unwrap().map_range.start()
-                    )
-                } else {
-                    String::from("")
-                };
+            let formatted_value = format!("{:#018x}", value_or_addr);
+            let mem = if maybe_range.is_some()
+                && maybe_range.as_ref().unwrap().map_range.filename().is_some()
+            {
+                format!(
+                    "{} {} +{:#04x}",
+                    maybe_range.as_ref().unwrap().map_range.flags,
+                    maybe_range
+                        .as_ref()
+                        .unwrap()
+                        .map_range
+                        .filename()
+                        .unwrap()
+                        .file_stem()
+                        .unwrap()
+                        .to_str()
+                        .unwrap(),
+                    (value_or_addr as usize) - maybe_range.as_ref().unwrap().map_range.start()
+                )
+            } else {
+                String::from("")
+            };
 
             let cells = vec![
                 Cell::from(reg_name),
@@ -114,20 +98,11 @@ impl crate::tui::Component for NRegisters {
         app_data_handle: &crate::AppDataHandle,
     ) {
     }
-    fn handle_app_event(&mut self, event: &crate::AppEvent) {
-        match event {
-            crate::AppEvent::Gdb(crate::mi2command::GdbMessage::RegisterValue(regs)) => {
-                for (k, v) in regs.iter() {
-                    self.value.insert(k.clone(), *v);
-                }
-            }
-
-            crate::AppEvent::Gdb(crate::mi2command::GdbMessage::Maps(maps)) => {
-                self.memory_maps = maps.clone();
-            }
-
-            _ => {}
-        }
+    fn handle_app_event(
+        &mut self,
+        event: &crate::AppEvent,
+        app_data_handle: &crate::AppDataHandle,
+    ) {
     }
 
     fn handle_ui_event(&mut self, event: &crate::tui::UiEvent) {}

@@ -12,6 +12,16 @@ pub fn border_focus(focus: bool) -> Style {
     }
 }
 
+pub fn memory_permissions(r: bool, w: bool, x: bool) -> Style {
+    match (r, w, x) {
+        (true, true, true) => Style::default().bold().red(),
+        (true, true, false) => Style::default().blue(),
+        (true, false, true) => Style::default().yellow().bold(),
+        (true, false, false) => Style::default().dark_gray(),
+        _ => Style::default(),
+    }
+}
+
 pub struct UILayout {
     pub unused: Vec<Rect>,
     pub sections: HashMap<Id, Rect>,

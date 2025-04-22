@@ -1,3 +1,4 @@
+use crate::process_ui::ProcessState;
 use crate::theme;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::prelude::*;
@@ -17,7 +18,7 @@ impl UserInput {
 }
 
 impl crate::tui::Component for UserInput {
-    fn view(&mut self, frame: &mut Frame, rect: Rect, focused: bool) {
+    fn view(&mut self, process: &ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
         frame.render_widget(
             Paragraph::new(self.history.last().unwrap().as_str())
                 .style(Color::Red)
@@ -29,7 +30,12 @@ impl crate::tui::Component for UserInput {
             rect,
         );
     }
-    fn handle_app_event(&mut self, event: &crate::AppEvent) {}
+    fn handle_app_event(
+        &mut self,
+        event: &crate::AppEvent,
+        app_data_handle: &crate::AppDataHandle,
+    ) {
+    }
     fn handle_ui_event(&mut self, event: &crate::tui::UiEvent) {}
     fn handle_terminal_event(&mut self, event: &Event, app_data_handle: &crate::AppDataHandle) {
         match event {

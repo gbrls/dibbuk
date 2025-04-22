@@ -1,25 +1,20 @@
+use crate::process_ui::ProcessState;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::prelude::*;
 use ratatui::widgets::*;
 use std::time::{Duration, SystemTime};
 
-pub struct Disasm {
-    value: std::collections::HashMap<usize, crate::mi2command::Disassembly>,
-    instruction_pointer: Option<u64>,
-}
+pub struct Disasm {}
 
 impl Disasm {
     pub fn new() -> Self {
-        Disasm {
-            value: std::collections::HashMap::new(),
-            instruction_pointer: None,
-        }
+        Disasm {}
     }
 }
 
 impl crate::tui::Component for Disasm {
-    fn view(&mut self, frame: &mut Frame, rect: Rect, focused: bool) {
-        let register_names = self.value.keys();
+    fn view(&mut self, process: &ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
+        let instruction_pointer = process.registers.get("rip").cloned();
 
         let header_cells = ["Address", "Asm"]
             .iter()
@@ -29,17 +24,17 @@ impl crate::tui::Component for Disasm {
             .height(1)
             .bottom_margin(1);
 
-        let mut addrs: Vec<_> = self
-            .value
+        let mut addrs: Vec<_> = process
+            .disassembly
             .iter()
-            .filter(|(addr, _)| addr.abs_diff(self.instruction_pointer.unwrap_or(0) as usize) < 64)
+            .filter(|(addr, _)| addr.abs_diff(instruction_pointer.unwrap_or(0)) < 64)
             .collect();
         addrs.sort_by(|(addr0, asm0), (addr1, asm1)| addr0.cmp(addr1));
 
         let selected = {
             let mut ret = None;
             for (i, (addr, _)) in addrs.iter().enumerate() {
-                if (self.instruction_pointer.unwrap_or(0) as usize) == **addr {
+                if instruction_pointer.unwrap_or(0) == **addr {
                     ret = Some(i);
                 }
             }
@@ -50,9 +45,9 @@ impl crate::tui::Component for Disasm {
             let formatted_value = format!("{}", disasm.str);
             let fmt_addr = format!("{:#018x} {}+{:#05x}", addr, disasm.func, disasm.offset);
 
-            let style = match self.instruction_pointer {
-                Some(rip) if rip as usize > **addr => Style::default().dark_gray(),
-                Some(rip) if rip as usize == **addr => Style::default().yellow(),
+            let style = match instruction_pointer {
+                Some(rip) if rip > **addr => Style::default().dark_gray(),
+                Some(rip) if rip == **addr => Style::default().yellow(),
                 Some(_) => Style::default().white(),
                 None => Style::default(),
             };
@@ -65,7 +60,7 @@ impl crate::tui::Component for Disasm {
 
         let title = format!(
             "disassembly {:#018x}",
-            self.instruction_pointer.unwrap_or(0)
+            instruction_pointer.unwrap_or(0)
         );
 
         let register_table = Table::new(rows, widths)
@@ -82,24 +77,11 @@ impl crate::tui::Component for Disasm {
         let mut table_state = ratatui::widgets::TableState::default().with_selected(selected);
         frame.render_stateful_widget(register_table, rect, &mut table_state)
     }
-    fn handle_app_event(&mut self, event: &crate::AppEvent) {
-        match event {
-            crate::AppEvent::Gdb(crate::mi2command::GdbMessage::DisassemblyNative(asm_lines)) => {
-                for asm in asm_lines.iter() {
-                    self.value.insert(asm.addr, asm.clone());
-                }
-            }
-
-            crate::AppEvent::Gdb(crate::mi2command::GdbMessage::RegisterValue(regs)) => {
-                for (k, v) in regs.iter() {
-                    if k == "rip" {
-                        self.instruction_pointer = Some(*v);
-                    }
-                }
-            }
-
-            _ => {}
-        }
+    fn handle_app_event(
+        &mut self,
+        event: &crate::AppEvent,
+        app_data_handle: &crate::AppDataHandle,
+    ) {
     }
     fn handle_terminal_event(&mut self, event: &Event, app_data_handle: &crate::AppDataHandle) {}
     fn handle_ui_event(&mut self, event: &crate::tui::UiEvent) {}

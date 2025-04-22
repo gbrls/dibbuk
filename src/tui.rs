@@ -46,9 +46,15 @@ impl Default for ViewMode {
 }
 
 pub trait Component {
-    fn view(&mut self, frame: &mut Frame, rect: Rect, focused: bool);
+    fn view(
+        &mut self,
+        process_state: &crate::process_ui::ProcessState,
+        frame: &mut Frame,
+        rect: Rect,
+        focused: bool,
+    );
     fn handle_terminal_event(&mut self, event: &Event, app_data_handle: &crate::AppDataHandle);
-    fn handle_app_event(&mut self, event: &crate::AppEvent);
+    fn handle_app_event(&mut self, event: &crate::AppEvent, app_data_handle: &crate::AppDataHandle);
     fn handle_ui_event(&mut self, event: &UiEvent);
 }
 
@@ -69,6 +75,7 @@ struct Model {
     pub input_mode: InputMode,
     pub view_mode: ViewMode,
     pub components: HashMap<Id, Arc<dyn Component>>,
+    pub process_state: crate::process_ui::ProcessState,
     pub focus_stack: Vec<Id>,
 }
 unsafe impl Send for Model {}
@@ -112,6 +119,7 @@ impl Model {
             input_mode: InputMode::default(),
             view_mode: ViewMode::default(),
             components,
+            process_state: crate::process_ui::ProcessState::new(),
             focus_stack: Vec::new(),
         }
     }
@@ -141,7 +149,7 @@ impl Model {
         for (id, mut component) in self.components.iter_mut() {
             Arc::get_mut(&mut component)
                 .unwrap()
-                .handle_app_event(&event);
+                .handle_app_event(&event, &self.app_data);
         }
         None
     }
@@ -241,7 +249,12 @@ impl Model {
         for (id, rect) in layout.sections.iter() {
             Arc::get_mut(&mut self.components.get_mut(&id).unwrap())
                 .unwrap()
-                .view(frame, *rect, focused.is_some() && focused.unwrap() == id);
+                .view(
+                    &self.process_state,
+                    frame,
+                    *rect,
+                    focused.is_some() && focused.unwrap() == id,
+                );
         }
     }
 
@@ -319,6 +332,7 @@ async fn main_loop<B: Backend>(app_data_handle: crate::AppDataHandle, mut term: 
                 }
             }
             Ok(event) = app_event_rx.recv().fuse() => {
+                model.process_state.update(&event, &model.app_data);
                 if let Some(action) = model.handle_app_event(event) {
                     model.update(action);
                 }

@@ -12,6 +12,12 @@ pub enum GdbState {
     Exited,
 }
 
+impl Default for GdbState {
+    fn default() -> Self {
+        GdbState::Unknown
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Disassembly {
     pub str: String,

@@ -1,4 +1,5 @@
 use crate::parser::MiRecord;
+use crate::process_ui::ProcessState;
 use crate::theme;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::prelude::*;
@@ -27,7 +28,7 @@ impl Logs {
 }
 
 impl crate::tui::Component for Logs {
-    fn view(&mut self, frame: &mut Frame, rect: Rect, focused: bool) {
+    fn view(&mut self, process: &ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
         let lines = self.history.iter().enumerate().map(|(i, l)| {
             let style = if l.starts_with("GdbMi") {
                 Style::default().dark_gray()
@@ -57,7 +58,11 @@ impl crate::tui::Component for Logs {
             &mut self.list_state,
         );
     }
-    fn handle_app_event(&mut self, event: &crate::AppEvent) {
+    fn handle_app_event(
+        &mut self,
+        event: &crate::AppEvent,
+        app_data_handle: &crate::AppDataHandle,
+    ) {
         match event {
             crate::AppEvent::GdbMi(MiRecord::ConsoleStream(s)) => {
                 self.history
