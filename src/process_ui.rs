@@ -1,5 +1,7 @@
 use crate::AppDataHandle;
 use crate::{AppEvent, Disassembly, GdbMessage, GdbState, MemMap, StackFrame};
+use proc_maps::get_process_maps;
+use read_process_memory::CopyAddress;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -10,6 +12,8 @@ pub struct ProcessState {
     pub memory_maps: Option<Vec<MemMap>>,
     pub disassembly: HashMap<u64, Disassembly>,
     pub events_history: Vec<AppEvent>,
+    pub memory_probes: HashMap<String, (u64, Vec<u8>)>,
+    pub child_pid: Option<u64>,
 }
 
 impl ProcessState {
@@ -21,6 +25,8 @@ impl ProcessState {
             memory_maps: None,
             disassembly: HashMap::new(),
             events_history: Vec::new(),
+            memory_probes: HashMap::new(),
+            child_pid: None,
         }
     }
 
@@ -29,15 +35,60 @@ impl ProcessState {
         self.update_registers(event);
         self.update_callstack(event);
         self.update_disassembly(event);
+        self.update_pid(event);
         self.events_history.push(event.clone());
 
-        self.update_mem(event, app);
+        self.ask_update_mem(event, app);
     }
 
-    pub fn update_mem(&self, event: &AppEvent, app: &AppDataHandle) {
+    pub fn update_pid(&mut self, event: &AppEvent) {
+        match event {
+            AppEvent::Gdb(GdbMessage::Pid(pid)) => {
+                self.child_pid = Some(*pid);
+            }
+            _ => {}
+        }
+    }
+
+    pub fn telescope(&self, addr: u64, mut acc: Vec<u64>) -> Option<Vec<u64>> {
+        match self.addr_memory_map(addr) {
+            _ if acc.len() > 8 => None,
+            None if acc.is_empty() => None,
+            None => Some(acc),
+            Some(_) => {
+                let bytes = self.read_memory_bytes(addr, 8).unwrap();
+
+                let len = 8.min(bytes.len());
+                let mut buf = [0u8; 8];
+                buf[..len].copy_from_slice(&bytes[..len]);
+
+                let nadr = u64::from_le_bytes(buf);
+                let mut ans = vec![nadr];
+                acc.append(&mut ans);
+                match self.telescope(nadr, acc) {
+                    None => {}
+                    Some(mut seq) => ans.append(&mut seq),
+                };
+                Some(ans)
+            }
+        }
+    }
+
+    pub fn read_memory_bytes(&self, addr: u64, size: u64) -> Option<Vec<u8>> {
+        match self.addr_memory_map(addr) {
+            None => None,
+            Some(_) => {
+                let h: read_process_memory::ProcessHandle =
+                    (self.child_pid.unwrap() as i32).try_into().unwrap();
+                read_process_memory::copy_address(addr as usize, size as usize, &h).ok()
+            }
+        }
+    }
+
+    pub fn ask_update_mem(&self, event: &AppEvent, app: &AppDataHandle) {
         match event {
             AppEvent::Gdb(_) => {
-                for maybe_addr in self.registers.values() {
+                for (reg_name, maybe_addr) in self.registers.iter() {
                     if let Some(_map) = self.addr_memory_map(*maybe_addr) {
                         app.try_read_mem(*maybe_addr, 8);
                     }
@@ -92,6 +143,11 @@ impl ProcessState {
             AppEvent::Gdb(GdbMessage::RegisterValue(regsv)) => {
                 for (k, v) in regsv.iter() {
                     self.registers.insert(k.clone(), *v);
+                    let rmem = self.read_memory_bytes(*v, 128);
+                    match rmem {
+                        Some(mem) => self.memory_probes.insert(k.clone(), (*v, mem)),
+                        None => self.memory_probes.remove(k),
+                    };
                 }
             }
             _ => {}

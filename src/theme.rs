@@ -80,8 +80,9 @@ impl UILayout {
             .direction(Direction::Vertical)
             .constraints(
                 [
-                    Constraint::Percentage(50), //  regs
-                    Constraint::Percentage(50), //  logs
+                    Constraint::Percentage(40), //  regs
+                    Constraint::Percentage(40), //  memory
+                    Constraint::Percentage(20), //  logs
                 ]
                 .as_ref(),
             )
@@ -101,7 +102,8 @@ impl UILayout {
         sections.insert(Id::Disassembly, vchunks_left[0]);
         sections.insert(Id::Callstack, vchunks_left[1]);
         sections.insert(Id::Registers, vchunks_right[0]);
-        sections.insert(Id::Logs, vchunks_right[1]);
+        sections.insert(Id::MemoryProbes, vchunks_right[1]);
+        sections.insert(Id::Logs, vchunks_right[2]);
 
         UILayout { unused, sections }
     }

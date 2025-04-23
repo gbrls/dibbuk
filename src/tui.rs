@@ -67,6 +67,7 @@ pub enum Id {
     Welcome,
     GDbUserInput,
     Callstack,
+    MemoryProbes,
 }
 
 struct Model {
@@ -108,6 +109,10 @@ impl Model {
             (
                 Id::Callstack,
                 Arc::new(components::CallStack::new()) as Arc<dyn Component>,
+            ),
+            (
+                Id::MemoryProbes,
+                Arc::new(components::MemoryProbes::new()) as Arc<dyn Component>,
             ),
         ]
         .into_iter()

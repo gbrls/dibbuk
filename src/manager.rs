@@ -2,7 +2,7 @@
 use proc_maps::get_process_maps;
 use read_process_memory::CopyAddress;
 
-fn read64(pid: u64, addr: u64, size: u64) -> Vec<u8> {
+pub fn read_memory_bytes(pid: u64, addr: u64, size: u64) -> Vec<u8> {
     let h: read_process_memory::ProcessHandle = (pid as i32).try_into().unwrap();
     read_process_memory::copy_address(addr as usize, size as usize, &h).unwrap()
 }
@@ -63,7 +63,7 @@ pub async fn run(mut data: crate::AppDataHandle) {
                 }
                 ReadMemory(addr, size) => {
                     if let Some(pid) = main_pid {
-                        let mem = read64(pid, addr, size);
+                        let mem = read_memory_bytes(pid, addr, size);
 
                         data.channels
                             .event_tx
