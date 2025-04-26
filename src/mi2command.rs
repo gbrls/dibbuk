@@ -22,6 +22,8 @@ impl Default for GdbState {
 pub struct Disassembly {
     pub str: String,
     pub func: String,
+    pub operand: Option<String>,
+    pub mnemonic: Option<String>,
     pub offset: usize,
     pub addr: usize,
 }
@@ -66,6 +68,7 @@ pub enum GdbMessage {
     StateUpdate(GdbState),
     DisassemblyNative(Vec<Disassembly>),
     StackFrames(Vec<StackFrame>),
+    Cwd(String),
 }
 
 //TODO: refactor with generics to handle other architectures
@@ -230,6 +233,8 @@ pub async fn run(mut data: crate::AppDataHandle) {
                                         addr,
                                         str: instr.clone(),
                                         func: fname.clone(),
+                                        operand: None,
+                                        mnemonic: None,
                                     }),
                                 _ => {}
                             }
@@ -333,6 +338,18 @@ pub async fn run(mut data: crate::AppDataHandle) {
                     }
                 }
 
+                Some(MiRecord::Result(ResultRecord { results, .. }))
+                    if results.contains_key("cwd") =>
+                {
+                    if let MiValue::Const(cwd) = results.get("cwd").unwrap() {
+                        data.channels
+                            .event_tx
+                            .send(crate::AppEvent::Gdb(GdbMessage::Cwd(cwd.clone())))
+                            .unwrap();
+                    }
+                }
+
+                // ││[12] GdbMi(Result(ResultRecord { token: None, class: "done", results: {"cwd": Const("/home/gbrls/Documents/vr-src/v8")} }))
                 Some(MiRecord::Result(ResultRecord { results, .. }))
                     if results.contains_key("stack") =>
                 {

@@ -7,6 +7,7 @@ pub mod process;
 pub mod theme;
 pub mod tui;
 pub mod process_ui;
+pub mod capstone_disassembly;
 
 
 pub use mi2command::GdbContext;

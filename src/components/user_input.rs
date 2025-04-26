@@ -41,7 +41,7 @@ impl crate::tui::Component for UserInput {
         match event {
             Event::Key(KeyEvent {
                 code: KeyCode::Char(c),
-                modifiers: KeyModifiers::NONE,
+                //modifiers: KeyModifiers::NONE,
                 ..
             }) => {
                 if self.history.is_empty() {

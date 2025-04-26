@@ -3,6 +3,7 @@ use crate::{AppEvent, Disassembly, GdbMessage, GdbState, MemMap, StackFrame};
 use proc_maps::get_process_maps;
 use read_process_memory::CopyAddress;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct ProcessState {
@@ -11,9 +12,11 @@ pub struct ProcessState {
     pub registers: HashMap<String, u64>,
     pub memory_maps: Option<Vec<MemMap>>,
     pub disassembly: HashMap<u64, Disassembly>,
+    pub cs_disassembly: Option<HashMap<u64, Disassembly>>,
     pub events_history: Vec<AppEvent>,
     pub memory_probes: HashMap<String, (u64, Vec<u8>)>,
     pub child_pid: Option<u64>,
+    pub environment_cwd: Option<PathBuf>,
 }
 
 impl ProcessState {
@@ -24,9 +27,11 @@ impl ProcessState {
             registers: HashMap::new(),
             memory_maps: None,
             disassembly: HashMap::new(),
+            cs_disassembly: None,
             events_history: Vec::new(),
             memory_probes: HashMap::new(),
             child_pid: None,
+            environment_cwd: None,
         }
     }
 
@@ -35,7 +40,9 @@ impl ProcessState {
         self.update_registers(event);
         self.update_callstack(event);
         self.update_disassembly(event);
+        self.lazy_update_cs_disassembly();
         self.update_pid(event);
+        self.update_cwd(event);
         self.events_history.push(event.clone());
 
         self.ask_update_mem(event, app);
@@ -56,7 +63,7 @@ impl ProcessState {
             None if acc.is_empty() => None,
             None => Some(acc),
             Some(_) => {
-                let bytes = self.read_memory_bytes(addr, 8).unwrap();
+                let bytes = self.read_memory_bytes(addr, 8).unwrap_or(vec![]);
 
                 let len = 8.min(bytes.len());
                 let mut buf = [0u8; 8];
@@ -127,6 +134,28 @@ impl ProcessState {
         }
     }
 
+    fn lazy_update_cs_disassembly(&mut self) {
+        let rip = self.registers.get("rip");
+        if self.cs_disassembly.is_none() {
+            self.force_update_cs_disassembly();
+        } else if rip.is_some()
+            && self
+                .cs_disassembly
+                .as_ref()
+                .unwrap()
+                .get(rip.unwrap())
+                .is_none()
+        {
+            self.force_update_cs_disassembly();
+        }
+    }
+
+    fn force_update_cs_disassembly(&mut self) {
+        if let (Some(pid), Some(maps)) = (self.child_pid, &self.memory_maps) {
+            self.cs_disassembly = Some(crate::capstone_disassembly::get_all_disassembly(maps, pid));
+        }
+    }
+
     fn update_disassembly(&mut self, event: &AppEvent) {
         match event {
             AppEvent::Gdb(GdbMessage::DisassemblyNative(asm_lines)) => {
@@ -169,6 +198,15 @@ impl ProcessState {
             AppEvent::Gdb(GdbMessage::StackFrames(frames)) => {
                 self.frames = Some(frames.clone());
                 self.frames.as_mut().unwrap().sort_by_key(|f| f.depth);
+            }
+            _ => {}
+        }
+    }
+
+    fn update_cwd(&mut self, event: &AppEvent) {
+        match event {
+            AppEvent::Gdb(GdbMessage::Cwd(cwd)) => {
+                self.environment_cwd = PathBuf::try_from(cwd).ok();
             }
             _ => {}
         }

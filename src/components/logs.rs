@@ -21,7 +21,7 @@ impl Logs {
     pub fn new() -> Self {
         Logs {
             history: Vec::new(),
-            view_mode: LogsMode::JustConsole,
+            view_mode: LogsMode::Verbose,
             list_state: ListState::default(),
         }
     }

@@ -1,7 +1,9 @@
 use crate::process_ui::ProcessState;
+use crate::Disassembly;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::prelude::*;
 use ratatui::widgets::*;
+use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
 pub struct Disasm {}
@@ -12,11 +14,42 @@ impl Disasm {
     }
 }
 
+fn instructions_view_window(
+    disassembly: &HashMap<u64, Disassembly>,
+    instruction_pointer: Option<u64>,
+) -> Vec<(u64, Disassembly)> {
+    let mut addrs: Vec<_> = disassembly
+        .iter()
+        .filter(|(addr, _)| addr.abs_diff(instruction_pointer.unwrap_or(0)) < 256)
+        .map(|(addr, asm)| (*addr, asm.clone()))
+        .collect();
+
+    addrs.sort_by(|(addr0, asm0), (addr1, asm1)| addr0.cmp(addr1));
+    if let Some(rip) = instruction_pointer {
+        let idx = addrs.iter().enumerate().find_map(
+            |(i, (addr, _))| {
+                if *addr == rip {
+                    Some(i)
+                } else {
+                    None
+                }
+            },
+        );
+        if let Some(idx) = idx {
+            addrs.into_iter().skip((idx - 5).max(0)).collect()
+        } else {
+            addrs
+        }
+    } else {
+        addrs
+    }
+}
+
 impl crate::tui::Component for Disasm {
     fn view(&mut self, process: &ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
         let instruction_pointer = process.registers.get("rip").cloned();
 
-        let header_cells = ["Address", "Asm"]
+        let header_cells = ["Address", "instruction", "operand"]
             .iter()
             .map(|h| Cell::from(*h).style(Style::default().bold()));
         let header = Row::new(header_cells)
@@ -24,44 +57,80 @@ impl crate::tui::Component for Disasm {
             .height(1)
             .bottom_margin(1);
 
-        let mut addrs: Vec<_> = process
-            .disassembly
-            .iter()
-            .filter(|(addr, _)| addr.abs_diff(instruction_pointer.unwrap_or(0)) < 64)
-            .collect();
-        addrs.sort_by(|(addr0, asm0), (addr1, asm1)| addr0.cmp(addr1));
+        let addrs = instructions_view_window(&process.disassembly, instruction_pointer);
+        let cs_addrs = if let Some(cs_addrs) = &process.cs_disassembly {
+            instructions_view_window(cs_addrs, instruction_pointer)
+        } else {
+            vec![]
+        };
 
         let selected = {
             let mut ret = None;
             for (i, (addr, _)) in addrs.iter().enumerate() {
-                if instruction_pointer.unwrap_or(0) == **addr {
+                if instruction_pointer.unwrap_or(0) == *addr {
                     ret = Some(i);
                 }
             }
             ret
         };
 
-        let rows = addrs.iter().map(|(addr, disasm)| {
-            let formatted_value = format!("{}", disasm.str);
-            let fmt_addr = format!("{:#018x} {}+{:#05x}", addr, disasm.func, disasm.offset);
+        let rows = addrs.iter().zip(cs_addrs.iter()).enumerate().map(
+            |(i, ((addr, disasm), (cs_addr, cs_disasm)))| {
+                let mnemonic = Line::from(vec![Span::from(format!(
+                    "{} ",
+                    cs_disasm.mnemonic.as_ref().unwrap_or(&String::new())
+                ))
+                .style(Style::default().fg(Color::Green))]);
 
-            let style = match instruction_pointer {
-                Some(rip) if rip > **addr => Style::default().dark_gray(),
-                Some(rip) if rip == **addr => Style::default().yellow(),
-                Some(_) => Style::default().white(),
-                None => Style::default(),
-            };
+                let operand = Line::from(vec![Span::from(format!(
+                    "{}",
+                    cs_disasm.operand.as_ref().unwrap_or(&String::new())
+                ))
+                .style(Style::default().fg(Color::White))]);
 
-            let cells = vec![Cell::from(fmt_addr), Cell::from(formatted_value)];
-            Row::new(cells).height(1).style(style)
-        });
+                //let formatted_value = format!(
+                //    "{} | {} {}",
+                //    disasm.str,
+                //    cs_disasm.mnemonic.as_ref().unwrap_or(&String::new()),
+                //    cs_disasm.operand.as_ref().unwrap_or(&String::new())
+                //);
+                let fmt_addr = Line::from(vec![Span::from(format!("{:#018x} ", addr))]);
+                let fname_offset = if selected.is_some() && selected.unwrap() == i {
+                    Line::from(vec![Span::from(format!(
+                        "{}+{:#05x}",
+                        disasm.func, disasm.offset
+                    ))
+                    .style(Style::default().fg(Color::DarkGray))])
+                } else {
+                    Line::from(vec![Span::from(format!("{:#05x}", disasm.offset))
+                        .style(Style::default().fg(Color::DarkGray))])
+                };
 
-        let widths = [Constraint::Min(8), Constraint::Min(20)];
+                let style = match instruction_pointer {
+                    Some(rip) if rip > *addr => Style::default().dark_gray(),
+                    Some(rip) if rip == *addr => Style::default().yellow(),
+                    Some(_) => Style::default().white(),
+                    None => Style::default(),
+                };
 
-        let title = format!(
-            "disassembly {:#018x}",
-            instruction_pointer.unwrap_or(0)
+                let cells = vec![
+                    Cell::from(fname_offset),
+                    Cell::from(fmt_addr),
+                    Cell::from(mnemonic),
+                    Cell::from(operand),
+                ];
+                Row::new(cells).height(1).style(style)
+            },
         );
+
+        let widths = [
+            Constraint::Max(24),
+            Constraint::Max(20),
+            Constraint::Max(8),
+            Constraint::Min(10),
+        ];
+
+        let title = format!("disassembly {:#018x}", instruction_pointer.unwrap_or(0));
 
         let register_table = Table::new(rows, widths)
             .header(header)

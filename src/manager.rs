@@ -61,16 +61,16 @@ pub async fn run(mut data: crate::AppDataHandle) {
                             .unwrap();
                     }
                 }
-                ReadMemory(addr, size) => {
-                    if let Some(pid) = main_pid {
-                        let mem = read_memory_bytes(pid, addr, size);
+                //ReadMemory(addr, size) => {
+                //    if let Some(pid) = main_pid {
+                //        let mem = read_memory_bytes(pid, addr, size);
 
-                        data.channels
-                            .event_tx
-                            .send(crate::AppEvent::Memory(addr, mem))
-                            .unwrap();
-                    }
-                }
+                //        data.channels
+                //            .event_tx
+                //            .send(crate::AppEvent::Memory(addr, mem))
+                //            .unwrap();
+                //    }
+                //}
                 _ => {}
             }
         }

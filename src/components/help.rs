@@ -33,6 +33,7 @@ impl crate::tui::Component for Help {
                 Span::from(format!(" {:?} ", self.input_mode))
                     .style(Style::default().fg(Color::Black).bg(input_mode_color)),
                 Span::from(format!(" | {:?}", self.view_mode)),
+                Span::from(format!(" | {:?}", process.environment_cwd)),
             ]),
             rect,
         );

@@ -25,6 +25,7 @@ async fn main() {
                 StdinCommand::Input("set disassembly-flavor intel".into()),
                 StdinCommand::Input("starti".into()),
                 StdinCommand::Input("-thread-info".into()),
+                StdinCommand::Input("-environment-pwd".into()),
                 StdinCommand::GetRegisterNames,
             ];
 

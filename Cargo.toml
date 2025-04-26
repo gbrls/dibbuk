@@ -21,3 +21,4 @@ proc-maps = "0.4.0"
 console-subscriber = "0.4.1"
 read-process-memory = "0.1.6"
 tachyonfx = { version = "0.13.0", features = ["sendable"] }
+capstone = "0.13.0"
