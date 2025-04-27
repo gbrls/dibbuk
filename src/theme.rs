@@ -14,10 +14,12 @@ pub fn border_focus(focus: bool) -> Style {
 
 pub fn memory_permissions(r: bool, w: bool, x: bool) -> Style {
     match (r, w, x) {
-        (true, true, true) => Style::default().bold().red(),
+        (_, true, true) => Style::default().bold().red(),
         (true, true, false) => Style::default().blue(),
         (true, false, true) => Style::default().yellow().bold(),
-        (true, false, false) => Style::default().dark_gray(),
+        (true, false, false) => Style::default().light_magenta(),
+        (false, false, true) => Style::default().italic().red(),
+        (false, true, false) => Style::default().italic().red(),
         _ => Style::default(),
     }
 }

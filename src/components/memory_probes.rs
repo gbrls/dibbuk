@@ -65,7 +65,14 @@ impl crate::tui::Component for MemoryProbes {
                     ListItem::from(format!("{:?}", process.telescope(*addr, v))),
                 ]
             });
-        frame.render_widget(List::new(items), rect);
+        frame.render_widget(
+            List::new(items).block(
+                Block::bordered()
+                    .title("memory view")
+                    .border_style(crate::theme::border_focus(focused)),
+            ),
+            rect,
+        );
     }
 
     fn handle_terminal_event(

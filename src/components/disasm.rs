@@ -49,14 +49,6 @@ impl crate::tui::Component for Disasm {
     fn view(&mut self, process: &ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
         let instruction_pointer = process.registers.get("rip").cloned();
 
-        let header_cells = ["Address", "instruction", "operand"]
-            .iter()
-            .map(|h| Cell::from(*h).style(Style::default().bold()));
-        let header = Row::new(header_cells)
-            .style(Style::default().blue())
-            .height(1)
-            .bottom_margin(1);
-
         let addrs = instructions_view_window(&process.disassembly, instruction_pointer);
         let cs_addrs = if let Some(cs_addrs) = &process.cs_disassembly {
             instructions_view_window(cs_addrs, instruction_pointer)
@@ -74,63 +66,66 @@ impl crate::tui::Component for Disasm {
             ret
         };
 
-        let rows = addrs.iter().zip(cs_addrs.iter()).enumerate().map(
-            |(i, ((addr, disasm), (cs_addr, cs_disasm)))| {
-                let mnemonic = Line::from(vec![Span::from(format!(
-                    "{} ",
-                    cs_disasm.mnemonic.as_ref().unwrap_or(&String::new())
-                ))
-                .style(Style::default().fg(Color::Green))]);
+        let meta = format!("{}/{}", addrs.len(), cs_addrs.len());
+        let header_cells = ["Address".into(), meta, "operand".into()]
+            .into_iter()
+            .map(|h| Cell::from(h).style(Style::default().bold()));
 
-                let operand = Line::from(vec![Span::from(format!(
-                    "{}",
-                    cs_disasm.operand.as_ref().unwrap_or(&String::new())
-                ))
-                .style(Style::default().fg(Color::White))]);
+        let header = Row::new(header_cells)
+            .style(Style::default().blue())
+            .height(1)
+            .bottom_margin(1);
 
-                //let formatted_value = format!(
-                //    "{} | {} {}",
-                //    disasm.str,
-                //    cs_disasm.mnemonic.as_ref().unwrap_or(&String::new()),
-                //    cs_disasm.operand.as_ref().unwrap_or(&String::new())
-                //);
-                let fmt_addr = Line::from(vec![Span::from(format!("{:#018x} ", addr))]);
-                let fname_offset = if selected.is_some() && selected.unwrap() == i {
-                    Line::from(vec![Span::from(format!(
-                        "{}+{:#05x}",
-                        disasm.func, disasm.offset
-                    ))
-                    .style(Style::default().fg(Color::DarkGray))])
-                } else {
-                    Line::from(vec![Span::from(format!("{:#05x}", disasm.offset))
-                        .style(Style::default().fg(Color::DarkGray))])
-                };
+        //let rows = addrs.iter().zip(cs_addrs.iter()).enumerate().map(
+        //    |(i, ((gdb_addr, gdb_disasm), (addr, disasm)))| {
+        let rows = cs_addrs.iter().enumerate().map(|(i, (addr, disasm))| {
+            let mnemonic = Line::from(vec![Span::from(format!(
+                "{} ",
+                disasm.mnemonic.as_ref().unwrap_or(&String::new())
+            ))
+            .style(Style::default().fg(Color::Green))]);
 
-                let style = match instruction_pointer {
-                    Some(rip) if rip > *addr => Style::default().dark_gray(),
-                    Some(rip) if rip == *addr => Style::default().yellow(),
-                    Some(_) => Style::default().white(),
-                    None => Style::default(),
-                };
+            let operand = Line::from(vec![Span::from(format!(
+                "{}",
+                disasm.operand.as_ref().unwrap_or(&String::new())
+            ))
+            .style(Style::default().fg(Color::White))]);
 
-                let cells = vec![
-                    Cell::from(fname_offset),
-                    Cell::from(fmt_addr),
-                    Cell::from(mnemonic),
-                    Cell::from(operand),
-                ];
-                Row::new(cells).height(1).style(style)
-            },
-        );
+            let fmt_addr = Line::from(vec![Span::from(format!("{:#018x} ", disasm.offset))]);
+            let style = match instruction_pointer {
+                Some(rip) if rip > *addr => Style::default().dark_gray(),
+                Some(rip) if rip == *addr => Style::default().yellow(),
+                Some(_) => Style::default().white(),
+                None => Style::default(),
+            };
 
-        let widths = [
-            Constraint::Max(24),
-            Constraint::Max(20),
-            Constraint::Max(8),
-            Constraint::Min(10),
-        ];
+            let cells = vec![
+                Cell::from(fmt_addr),
+                Cell::from(mnemonic),
+                Cell::from(operand),
+            ];
+            Row::new(cells).height(1).style(style)
+        });
 
-        let title = format!("disassembly {:#018x}", instruction_pointer.unwrap_or(0));
+        let widths = [Constraint::Max(20), Constraint::Max(8), Constraint::Min(10)];
+
+        let tmp = vec![];
+        let top = process
+            .frames
+            .as_ref()
+            .unwrap_or(&tmp)
+            .iter()
+            .take(1)
+            .next();
+        let title = if let Some(frame) = top {
+            format!(
+                "disassembly {}",
+                frame.function.as_ref().unwrap_or(&String::from("???"))
+            )
+        } else {
+            format!("disassembly {:#018x}", instruction_pointer.unwrap_or(0))
+        };
+        //let title = format!("disassembly {:#018x}", instruction_pointer.unwrap_or(0));
 
         let register_table = Table::new(rows, widths)
             .header(header)
@@ -141,7 +136,8 @@ impl crate::tui::Component for Disasm {
                     .border_style(crate::theme::border_focus(focused)),
             )
             .column_spacing(2)
-            .row_highlight_style(Style::default().bold());
+            .row_highlight_style(Style::default().bold())
+            .highlight_symbol("> ");
 
         let mut table_state = ratatui::widgets::TableState::default().with_selected(selected);
         frame.render_stateful_widget(register_table, rect, &mut table_state)

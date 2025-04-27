@@ -173,7 +173,7 @@ impl Model {
             (Insert, KeyCode::Esc, _) => Some(ChangeInputMode(Normal)),
             (Navigation, KeyCode::Esc, _) => Some(ChangeInputMode(Normal)),
 
-            (Navigation, KeyCode::Char('j'), _) => {
+            (Normal, KeyCode::Char('j'), _) => {
                 self.app_data
                     .channels
                     .gdb_stdin_tx
@@ -182,7 +182,7 @@ impl Model {
 
                 None
             }
-            (Navigation, KeyCode::Char('l'), _) => {
+            (Normal, KeyCode::Char('l'), _) => {
                 self.app_data
                     .channels
                     .gdb_stdin_tx
@@ -191,7 +191,7 @@ impl Model {
 
                 None
             }
-            (Navigation, KeyCode::Char('h'), _) => {
+            (Normal, KeyCode::Char('h'), _) => {
                 self.app_data
                     .channels
                     .gdb_stdin_tx
@@ -200,7 +200,7 @@ impl Model {
 
                 None
             }
-            (Navigation, KeyCode::Enter, _) => {
+            (Normal, KeyCode::Enter, _) => {
                 self.app_data
                     .channels
                     .gdb_stdin_tx
@@ -324,6 +324,7 @@ async fn main_loop<B: Backend>(app_data_handle: crate::AppDataHandle, mut term: 
         let term_event = term_event_reader.next().fuse();
         select! {
             _ = tick => {
+                model.process_state.tick(&model.app_data);
                 term.draw(|f| {
                     model.view(f, f.area());
                     f.render_effect(&mut fx, f.area(), last_draw.elapsed().into());

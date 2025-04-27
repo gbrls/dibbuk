@@ -35,12 +35,15 @@ impl ProcessState {
         }
     }
 
+    pub fn tick(&mut self, app: &AppDataHandle) {
+        self.lazy_update_cs_disassembly();
+    }
+
     pub fn update(&mut self, event: &AppEvent, app: &AppDataHandle) {
         self.update_memory_maps(event);
         self.update_registers(event);
         self.update_callstack(event);
         self.update_disassembly(event);
-        self.lazy_update_cs_disassembly();
         self.update_pid(event);
         self.update_cwd(event);
         self.events_history.push(event.clone());
@@ -146,7 +149,14 @@ impl ProcessState {
                 .get(rip.unwrap())
                 .is_none()
         {
-            self.force_update_cs_disassembly();
+            //println!("lazy update!!");
+            //self.force_update_cs_disassembly();
+            crate::capstone_disassembly::update_segment_containing_address(
+                *rip.unwrap(),
+                self.memory_maps.as_ref().unwrap(),
+                self.child_pid.unwrap(),
+                &mut self.cs_disassembly.as_mut().unwrap(),
+            );
         }
     }
 
