@@ -1,3 +1,4 @@
+use crate::components::telescope;
 use crate::mi2command::StackFrame;
 use crate::process_ui::ProcessState;
 use crate::tui::{InputMode, ViewMode};
@@ -63,35 +64,8 @@ impl crate::tui::Component for MemoryProbes {
                     vec![]
                 } else {
                     let tele = tele.unwrap();
-                    let tele_len = tele.len();
 
-                    let tele: Vec<_> = tele
-                        .into_iter()
-                        .enumerate()
-                        .flat_map(|(i, maybe_addr)| {
-                            let style = match process.addr_memory_perm(maybe_addr) {
-                                Some((r, w, x)) => crate::theme::memory_permissions(r, w, x),
-                                None => Style::default(),
-                            };
-
-                            if i == (tele_len - 1) {
-                                vec![Span::from(format!("{maybe_addr:#02x}")).style(style)]
-                            } else if i == 0 {
-                                vec![
-                                    Span::from(format!("{name}: ")).style(Style::default()),
-                                    Span::from(format!("{maybe_addr:#018x}")).style(style),
-                                    Span::from(" > ").style(Style::default()),
-                                ]
-                            } else {
-                                vec![
-                                    Span::from(format!("{maybe_addr:#018x}")).style(style),
-                                    Span::from(" > ").style(Style::default()),
-                                ]
-                            }
-                        })
-                        .collect();
-
-                    vec![ListItem::from(Line::from(tele))]
+                    vec![telescope(tele, &process, true, "".into())]
                 }
             });
         frame.render_widget(

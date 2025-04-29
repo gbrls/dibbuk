@@ -24,6 +24,7 @@ pub fn memory_permissions(r: bool, w: bool, x: bool) -> Style {
     }
 }
 
+
 pub struct UILayout {
     pub unused: Vec<Rect>,
     pub sections: HashMap<Id, Rect>,
@@ -71,8 +72,8 @@ impl UILayout {
             .direction(Direction::Horizontal)
             .constraints(
                 [
-                    Constraint::Percentage(55), //  disasm
-                    Constraint::Percentage(45), //  regs / logs
+                    Constraint::Percentage(40), //  disasm
+                    Constraint::Percentage(60), //  regs / logs
                 ]
                 .as_ref(),
             )
@@ -82,8 +83,8 @@ impl UILayout {
             .direction(Direction::Vertical)
             .constraints(
                 [
-                    Constraint::Percentage(40), //  regs
-                    Constraint::Percentage(40), //  memory
+                    Constraint::Percentage(60), //  regs
+                    Constraint::Percentage(20), //  memory
                     Constraint::Percentage(20), //  logs
                 ]
                 .as_ref(),

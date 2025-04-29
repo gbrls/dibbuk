@@ -1,3 +1,4 @@
+use crate::components::telescope;
 use crate::process_ui::ProcessState;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::prelude::*;
@@ -33,7 +34,7 @@ impl crate::tui::Component for NRegisters {
             .height(1)
             .bottom_margin(1);
 
-        let rows = common_x64_registers.iter().map(|&reg_name| {
+        let rows = common_x64_registers.iter().flat_map(|&reg_name| {
             let value_or_addr = process.registers.get(reg_name).copied().unwrap_or(0);
 
             let maybe_range = process.addr_memory_map(value_or_addr);
@@ -66,16 +67,27 @@ impl crate::tui::Component for NRegisters {
             };
 
             let cells = vec![
-                Cell::from(reg_name),
+                Cell::from(reg_name).style(Style::default().white().bold()),
                 Cell::from(formatted_value).style(style),
                 Cell::from(mem).style(Style::default().dark_gray()),
             ];
-            Row::new(cells).height(1)
+
+            let tele = process.telescope(value_or_addr, vec![]);
+            if tele.is_some() {
+                let tele = tele.unwrap();
+                let tele = telescope(tele, &process, false, "  L ".into());
+                vec![
+                    Row::new(cells).height(1),
+                    Row::new(vec![Cell::from(String::new()), Cell::from(tele).dim()]),
+                ]
+            } else {
+                vec![Row::new(cells).height(1)]
+            }
         });
 
         let widths = [
             Constraint::Length(8),
-            Constraint::Length(20),
+            Constraint::Min(20),
             Constraint::Length(32),
         ];
 
