@@ -58,7 +58,7 @@ impl crate::tui::Component for Disasm {
 
         let selected = {
             let mut ret = None;
-            for (i, (addr, _)) in addrs.iter().enumerate() {
+            for (i, (addr, _)) in cs_addrs.iter().enumerate() {
                 if instruction_pointer.unwrap_or(0) == *addr {
                     ret = Some(i);
                 }

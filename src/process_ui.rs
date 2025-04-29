@@ -64,22 +64,22 @@ impl ProcessState {
         match self.addr_memory_map(addr) {
             _ if acc.len() > 8 => None,
             None if acc.is_empty() => None,
-            None => Some(acc),
-            Some(_) => {
+            Some(map) if map.map_range.is_read() => {
                 let bytes = self.read_memory_bytes(addr, 8).unwrap_or(vec![]);
 
                 let len = 8.min(bytes.len());
                 let mut buf = [0u8; 8];
                 buf[..len].copy_from_slice(&bytes[..len]);
 
-                let nadr = u64::from_le_bytes(buf);
-                let mut ans = vec![nadr];
-                acc.append(&mut ans);
-                match self.telescope(nadr, acc) {
-                    None => {}
-                    Some(mut seq) => ans.append(&mut seq),
-                };
-                Some(ans)
+                let next_addr = u64::from_le_bytes(buf);
+                acc.push(addr);
+                self.telescope(next_addr, acc)
+            }
+
+            _ => {
+                let v = addr;
+                acc.push(v);
+                Some(acc)
             }
         }
     }

@@ -58,12 +58,42 @@ impl crate::tui::Component for MemoryProbes {
             .flat_map(|(name, (addr, mem))| {
                 let v = Vec::new();
                 let (r, w, x) = process.addr_memory_perm(*addr).unwrap();
-                [
-                    ListItem::from(format!("{name} {addr:#018x}"))
-                        .style(crate::theme::memory_permissions(r, w, x)),
-                    ListItem::from(bytes_u8(mem)),
-                    ListItem::from(format!("{:?}", process.telescope(*addr, v))),
-                ]
+                let tele = process.telescope(*addr, v);
+                if tele.is_none() {
+                    vec![ListItem::from(format!("{name} {addr:#018x}"))
+                        .style(crate::theme::memory_permissions(r, w, x))]
+                } else {
+                    let tele = tele.unwrap();
+                    let tele_len = tele.len();
+
+                    let tele: Vec<_> = tele
+                        .into_iter()
+                        .enumerate()
+                        .flat_map(|(i, maybe_addr)| {
+                            let style = match process.addr_memory_perm(maybe_addr) {
+                                Some((r, w, x)) => crate::theme::memory_permissions(r, w, x),
+                                None => Style::default(),
+                            };
+
+                            if i == (tele_len - 1) {
+                                vec![Span::from(format!("{maybe_addr:#02x}")).style(style)]
+                            } else if i == 0 {
+                                vec![
+                                    Span::from(format!("{name}: ")).style(Style::default()),
+                                    Span::from(format!("{maybe_addr:#018x}")).style(style),
+                                    Span::from(" > ").style(Style::default()),
+                                ]
+                            } else {
+                                vec![
+                                    Span::from(format!("{maybe_addr:#018x}")).style(style),
+                                    Span::from(" > ").style(Style::default()),
+                                ]
+                            }
+                        })
+                        .collect();
+
+                    vec![ListItem::from(Line::from(tele))]
+                }
             });
         frame.render_widget(
             List::new(items).block(

@@ -1,4 +1,5 @@
 pub mod callstack;
+mod common;
 pub mod disasm;
 pub mod help;
 pub mod logs;
@@ -10,3 +11,5 @@ pub use callstack::CallStack;
 pub use disasm::Disasm;
 pub use memory_probes::MemoryProbes;
 pub use registers::NRegisters;
+
+pub use common::*;
