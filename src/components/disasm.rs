@@ -4,6 +4,7 @@ use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::prelude::*;
 use ratatui::widgets::*;
 use std::collections::HashMap;
+use std::fmt::format;
 use std::time::{Duration, SystemTime};
 
 pub struct Disasm {}
@@ -16,44 +17,48 @@ impl Disasm {
 
 fn instructions_view_window(
     disassembly: &HashMap<u64, Disassembly>,
-    instruction_pointer: Option<u64>,
+    instruction_pointer: u64,
 ) -> Vec<(u64, Disassembly)> {
     let mut addrs: Vec<_> = disassembly
         .iter()
-        .filter(|(addr, _)| addr.abs_diff(instruction_pointer.unwrap_or(0)) < 256)
+        .filter(|(addr, _)| addr.abs_diff(instruction_pointer) < 256)
         .map(|(addr, asm)| (*addr, asm.clone()))
         .collect();
 
     addrs.sort_by(|(addr0, asm0), (addr1, asm1)| addr0.cmp(addr1));
-    if let Some(rip) = instruction_pointer {
-        let idx = addrs.iter().enumerate().find_map(
-            |(i, (addr, _))| {
-                if *addr == rip {
-                    Some(i)
-                } else {
-                    None
-                }
-            },
-        );
-        if let Some(idx) = idx {
-            addrs.into_iter().skip((idx - 5).max(0)).collect()
-        } else {
-            addrs
-        }
+
+    let rip_idx = addrs
+        .iter()
+        .enumerate()
+        .find_map(|(i, (addr, _))| {
+            if *addr == instruction_pointer {
+                Some(i)
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0);
+    let before_rip_view = 5;
+    let to_skip = if rip_idx >= before_rip_view {
+        rip_idx - before_rip_view
     } else {
-        addrs
-    }
+        0
+    };
+
+    addrs.into_iter().skip(to_skip).collect()
 }
 
 impl crate::tui::Component for Disasm {
-    fn view(&mut self, process: &ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
+    fn view(&mut self, process: &mut ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
         let instruction_pointer = process.registers.get("rip").cloned();
 
-        let addrs = instructions_view_window(&process.disassembly, instruction_pointer);
-        let cs_addrs = if let Some(cs_addrs) = &process.cs_disassembly {
-            instructions_view_window(cs_addrs, instruction_pointer)
+        let (addrs, cs_addrs) = if instruction_pointer.is_some() {
+            (
+                instructions_view_window(&process.disassembly, instruction_pointer.unwrap()),
+                instructions_view_window(&process.cs_disassembly, instruction_pointer.unwrap()),
+            )
         } else {
-            vec![]
+            (vec![], vec![])
         };
 
         let selected = {
@@ -140,7 +145,7 @@ impl crate::tui::Component for Disasm {
             .highlight_symbol("> ");
 
         let mut table_state = ratatui::widgets::TableState::default().with_selected(selected);
-        frame.render_stateful_widget(register_table, rect, &mut table_state)
+        frame.render_stateful_widget(register_table, rect, &mut table_state);
     }
     fn handle_app_event(
         &mut self,

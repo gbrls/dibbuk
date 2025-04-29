@@ -18,7 +18,7 @@ impl UserInput {
 }
 
 impl crate::tui::Component for UserInput {
-    fn view(&mut self, process: &ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
+    fn view(&mut self, process: &mut ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
         frame.render_widget(
             Paragraph::new(self.history.last().unwrap().as_str())
                 .style(Color::Red)

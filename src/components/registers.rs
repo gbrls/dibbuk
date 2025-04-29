@@ -12,7 +12,7 @@ impl NRegisters {
 }
 
 impl crate::tui::Component for NRegisters {
-    fn view(&mut self, process: &ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
+    fn view(&mut self, process: &mut ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
         let register_names = process.registers.keys();
         let state_message = Paragraph::new(format!(
             "rip -> {:#x}",

@@ -48,7 +48,7 @@ impl Default for ViewMode {
 pub trait Component {
     fn view(
         &mut self,
-        process_state: &crate::process_ui::ProcessState,
+        process_state: &mut crate::process_ui::ProcessState,
         frame: &mut Frame,
         rect: Rect,
         focused: bool,
@@ -255,7 +255,7 @@ impl Model {
             Arc::get_mut(&mut self.components.get_mut(&id).unwrap())
                 .unwrap()
                 .view(
-                    &self.process_state,
+                    &mut self.process_state,
                     frame,
                     *rect,
                     focused.is_some() && focused.unwrap() == id,

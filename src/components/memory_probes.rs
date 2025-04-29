@@ -51,7 +51,7 @@ fn bytes_u8(mem: &[u8]) -> String {
 }
 
 impl crate::tui::Component for MemoryProbes {
-    fn view(&mut self, process: &ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
+    fn view(&mut self, process: &mut ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
         let items = process
             .memory_probes
             .iter()
@@ -60,8 +60,7 @@ impl crate::tui::Component for MemoryProbes {
                 let (r, w, x) = process.addr_memory_perm(*addr).unwrap();
                 let tele = process.telescope(*addr, v);
                 if tele.is_none() {
-                    vec![ListItem::from(format!("{name} {addr:#018x}"))
-                        .style(crate::theme::memory_permissions(r, w, x))]
+                    vec![]
                 } else {
                     let tele = tele.unwrap();
                     let tele_len = tele.len();

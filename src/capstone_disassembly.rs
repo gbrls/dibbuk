@@ -13,7 +13,7 @@ pub fn capstone2dbk(ins: &capstone::Insn) -> Disassembly {
     }
 }
 
-pub fn disasm_in_map(map: &MemMap, pid: u64) -> HashMap<u64, Disassembly> {
+pub fn disasm_in_map(map: &MemMap, pid: u64, offset: usize) -> HashMap<u64, Disassembly> {
     let h: read_process_memory::ProcessHandle = (pid as i32).try_into().unwrap();
     let cs = Capstone::new()
         .x86()
@@ -27,7 +27,7 @@ pub fn disasm_in_map(map: &MemMap, pid: u64) -> HashMap<u64, Disassembly> {
     let mut instructions = HashMap::new();
     if map.is_exec() {
         match read_process_memory::copy_address(map.start(), map.size(), &h) {
-            Ok(mem) => match cs.disasm_all(mem.as_slice(), map.start() as u64) {
+            Ok(mem) => match cs.disasm_all(mem.as_slice(), (map.start() + offset) as u64) {
                 Ok(cs) => {
                     //println!("csok! {:?}", cs);
                     for ins in cs.iter() {
@@ -62,12 +62,12 @@ pub fn get_all_disassembly(memory_maps: &[MemMap], pid: u64) -> HashMap<u64, Dis
 
     let mut instructions = HashMap::new();
     for map in memory_maps {
-        instructions.extend(disasm_in_map(map, pid).into_iter());
+        instructions.extend(disasm_in_map(map, pid, 0).into_iter());
     }
     instructions
 }
 
-pub fn update_segment_containing_address(
+pub fn read_map_containing_address(
     addr: u64,
     memory_maps: &[MemMap],
     pid: u64,
@@ -87,5 +87,29 @@ pub fn update_segment_containing_address(
 
     //println!("off {:#018x}\n", addr - map.map_range.start() as u64);
 
-    disasm.extend(disasm_in_map(map, pid).into_iter());
+    disasm.extend(disasm_in_map(map, pid, 0).into_iter());
+}
+
+pub fn read_at(
+    addr: u64,
+    memory_maps: &[MemMap],
+    pid: u64,
+    disasm: &mut HashMap<u64, Disassembly>,
+) {
+    let map = memory_maps.iter().find(|map| {
+        //let addr = addr as usize - map.map_range.offset;
+        let addr = addr as usize;
+        map.map_range.start() <= addr && (map.map_range.start() + map.map_range.size()) >= addr
+    });
+
+    if map.is_none() {
+        return;
+    }
+
+    let map = map.unwrap();
+    let offset = addr as usize - map.map_range.start();
+
+    //println!("off {:#018x}\n", addr - map.map_range.start() as u64);
+
+    disasm.extend(disasm_in_map(map, pid, offset as usize).into_iter());
 }

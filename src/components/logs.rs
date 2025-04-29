@@ -28,7 +28,7 @@ impl Logs {
 }
 
 impl crate::tui::Component for Logs {
-    fn view(&mut self, process: &ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
+    fn view(&mut self, process: &mut ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
         let lines = self.history.iter().enumerate().map(|(i, l)| {
             let style = if l.starts_with("GdbMi") {
                 Style::default().dark_gray()

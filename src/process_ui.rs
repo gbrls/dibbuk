@@ -12,7 +12,7 @@ pub struct ProcessState {
     pub registers: HashMap<String, u64>,
     pub memory_maps: Option<Vec<MemMap>>,
     pub disassembly: HashMap<u64, Disassembly>,
-    pub cs_disassembly: Option<HashMap<u64, Disassembly>>,
+    pub cs_disassembly: HashMap<u64, Disassembly>,
     pub events_history: Vec<AppEvent>,
     pub memory_probes: HashMap<String, (u64, Vec<u8>)>,
     pub child_pid: Option<u64>,
@@ -27,7 +27,7 @@ impl ProcessState {
             registers: HashMap::new(),
             memory_maps: None,
             disassembly: HashMap::new(),
-            cs_disassembly: None,
+            cs_disassembly: HashMap::new(),
             events_history: Vec::new(),
             memory_probes: HashMap::new(),
             child_pid: None,
@@ -139,30 +139,31 @@ impl ProcessState {
 
     fn lazy_update_cs_disassembly(&mut self) {
         let rip = self.registers.get("rip");
-        if self.cs_disassembly.is_none() {
-            self.force_update_cs_disassembly();
-        } else if rip.is_some()
-            && self
-                .cs_disassembly
-                .as_ref()
-                .unwrap()
-                .get(rip.unwrap())
-                .is_none()
-        {
+        if self.cs_disassembly.is_empty() {
+            self.capstone_update_read_all_execmem();
+        } else if rip.is_some() && self.cs_disassembly.get(rip.unwrap()).is_none() {
             //println!("lazy update!!");
             //self.force_update_cs_disassembly();
-            crate::capstone_disassembly::update_segment_containing_address(
+            crate::capstone_disassembly::read_map_containing_address(
                 *rip.unwrap(),
                 self.memory_maps.as_ref().unwrap(),
                 self.child_pid.unwrap(),
-                &mut self.cs_disassembly.as_mut().unwrap(),
+                &mut self.cs_disassembly,
+            );
+
+            crate::capstone_disassembly::read_at(
+                *rip.unwrap(),
+                self.memory_maps.as_ref().unwrap(),
+                self.child_pid.unwrap(),
+                &mut self.cs_disassembly,
             );
         }
     }
 
-    fn force_update_cs_disassembly(&mut self) {
+    fn capstone_update_read_all_execmem(&mut self) {
         if let (Some(pid), Some(maps)) = (self.child_pid, &self.memory_maps) {
-            self.cs_disassembly = Some(crate::capstone_disassembly::get_all_disassembly(maps, pid));
+            self.cs_disassembly
+                .extend((crate::capstone_disassembly::get_all_disassembly(maps, pid)));
         }
     }
 

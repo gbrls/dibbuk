@@ -14,7 +14,7 @@ impl CallStack {
 }
 
 impl crate::tui::Component for CallStack {
-    fn view(&mut self, process: &ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
+    fn view(&mut self, process: &mut ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
         if process.frames.is_none() {
             return;
         }

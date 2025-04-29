@@ -21,7 +21,7 @@ impl Help {
 }
 
 impl crate::tui::Component for Help {
-    fn view(&mut self, process: &ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
+    fn view(&mut self, process: &mut ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
         let input_mode_color = match self.input_mode {
             InputMode::Insert => Color::Red,
             InputMode::Normal => Color::Blue,
