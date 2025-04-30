@@ -1,3 +1,4 @@
+use crate::components::display_u64;
 use crate::mi2command::StackFrame;
 use crate::process_ui::ProcessState;
 use crate::tui::{InputMode, ViewMode};
@@ -20,14 +21,9 @@ impl crate::tui::Component for CallStack {
         }
 
         let frames = process.frames.as_ref().unwrap().iter().map(|f| {
-            let style = match process.addr_memory_perm(f.addr) {
-                Some((r, w, x)) => crate::theme::memory_permissions(r, w, x),
-                _ => Style::default(),
-            };
             Line::from(vec![
-                //Span::from(format!("{} ", f.depth)),
-                Span::from(format!("{:#018x} ", f.addr)).style(style),
-                Span::from(format!("{}", f.function.clone().unwrap_or("??".to_owned())))
+                display_u64(f.addr, process),
+                Span::from(format!(" {}", f.function.clone().unwrap_or("??".to_owned())))
                     .style(Style::default().dark_gray()),
             ])
         });

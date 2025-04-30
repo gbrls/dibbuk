@@ -1,3 +1,4 @@
+use crate::components::display_u64;
 use crate::components::telescope;
 use crate::process_ui::ProcessState;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
@@ -38,12 +39,7 @@ impl crate::tui::Component for NRegisters {
             let value_or_addr = process.registers.get(reg_name).copied().unwrap_or(0);
 
             let maybe_range = process.addr_memory_map(value_or_addr);
-            let style = match process.addr_memory_perm(value_or_addr) {
-                Some((r, w, x)) => crate::theme::memory_permissions(r, w, x),
-                None => Style::default(),
-            };
 
-            let formatted_value = format!("{:#018x}", value_or_addr);
             let mem = if maybe_range.is_some()
                 && maybe_range.as_ref().unwrap().map_range.filename().is_some()
             {
@@ -68,14 +64,14 @@ impl crate::tui::Component for NRegisters {
 
             let cells = vec![
                 Cell::from(reg_name).style(Style::default().white().bold()),
-                Cell::from(formatted_value).style(style),
+                Cell::from(display_u64(value_or_addr, process)),
                 Cell::from(mem).style(Style::default().dark_gray()),
             ];
 
             let tele = process.telescope(value_or_addr, vec![]);
             if tele.is_some() {
                 let tele = tele.unwrap();
-                let tele = telescope(tele, &process, false, "  L ".into());
+                let tele = telescope(tele, &process, false, "  └ ".into());
                 vec![
                     Row::new(cells).height(1),
                     Row::new(vec![Cell::from(String::new()), Cell::from(tele).dim()]),

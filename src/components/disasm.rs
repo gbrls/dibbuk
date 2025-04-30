@@ -1,3 +1,4 @@
+use crate::components::display_u64;
 use crate::process_ui::ProcessState;
 use crate::Disassembly;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
@@ -48,6 +49,16 @@ fn instructions_view_window(
     addrs.into_iter().skip(to_skip).collect()
 }
 
+fn display_operand(s: &str, process: &ProcessState) -> Span<'static> {
+    let maybe_base16 = u64::from_str_radix(s.strip_prefix("0x").unwrap_or(""), 16);
+    let has_commas = s.contains(",");
+
+    match (has_commas, maybe_base16) {
+        (_, Ok(val)) => Span::from(display_u64(val, process)),
+        _ => Span::from(s.to_string()).style(Style::default().fg(Color::White)),
+    }
+}
+
 impl crate::tui::Component for Disasm {
     fn view(&mut self, process: &mut ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
         let instruction_pointer = process.registers.get("rip").cloned();
@@ -81,31 +92,27 @@ impl crate::tui::Component for Disasm {
             .height(1)
             .bottom_margin(1);
 
-        //let rows = addrs.iter().zip(cs_addrs.iter()).enumerate().map(
-        //    |(i, ((gdb_addr, gdb_disasm), (addr, disasm)))| {
-        let rows = cs_addrs.iter().enumerate().map(|(i, (addr, disasm))| {
+        let rows = cs_addrs.iter().enumerate().map(|(i, (row_addr, disasm))| {
             let mnemonic = Line::from(vec![Span::from(format!(
                 "{} ",
                 disasm.mnemonic.as_ref().unwrap_or(&String::new())
             ))
             .style(Style::default().fg(Color::Green))]);
 
-            let operand = Line::from(vec![Span::from(format!(
-                "{}",
-                disasm.operand.as_ref().unwrap_or(&String::new())
-            ))
-            .style(Style::default().fg(Color::White))]);
+            let operand = display_operand(
+                disasm.operand.as_ref().unwrap_or(&String::new()).as_str(),
+                process,
+            );
 
-            let fmt_addr = Line::from(vec![Span::from(format!("{:#018x} ", disasm.offset))]);
             let style = match instruction_pointer {
-                Some(rip) if rip > *addr => Style::default().dark_gray(),
-                Some(rip) if rip == *addr => Style::default().yellow(),
-                Some(_) => Style::default().white(),
+                Some(rip) if rip > *row_addr => Style::default().dim(),
+                Some(rip) if rip == *row_addr => Style::default().bold(),
+                Some(_) => Style::default(),
                 None => Style::default(),
             };
 
             let cells = vec![
-                Cell::from(fmt_addr),
+                Cell::from(display_u64(disasm.offset as u64, process).style(Style::default())),
                 Cell::from(mnemonic),
                 Cell::from(operand),
             ];
@@ -130,7 +137,6 @@ impl crate::tui::Component for Disasm {
         } else {
             format!("disassembly {:#018x}", instruction_pointer.unwrap_or(0))
         };
-        //let title = format!("disassembly {:#018x}", instruction_pointer.unwrap_or(0));
 
         let register_table = Table::new(rows, widths)
             .header(header)
@@ -141,8 +147,7 @@ impl crate::tui::Component for Disasm {
                     .border_style(crate::theme::border_focus(focused)),
             )
             .column_spacing(2)
-            .row_highlight_style(Style::default().bold())
-            .highlight_symbol("> ");
+            .highlight_symbol("> ".yellow());
 
         let mut table_state = ratatui::widgets::TableState::default().with_selected(selected);
         frame.render_stateful_widget(register_table, rect, &mut table_state);
