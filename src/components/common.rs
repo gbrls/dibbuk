@@ -1,4 +1,4 @@
-use crate::process_ui::ProcessState;
+use crate::{process_ui::ProcessState, tui::ViewOptions};
 use color_eyre::owo_colors::OwoColorize;
 use ratatui::{prelude::*, widgets::Paragraph};
 
@@ -40,10 +40,17 @@ pub fn art_u64(value: u64) -> String {
     format!("{b}{a}")
 }
 
-pub fn display_u64(value: u64, process: &ProcessState) -> Span<'static> {
+pub fn display_u64(
+    value: u64,
+    process: &ProcessState,
+    view_options: &ViewOptions,
+) -> Span<'static> {
     let art = art_u64(value);
-    Span::from(format!("{art}")).style(memory_style(value, process))
-    //Span::from(format!("{value:#018x} {art}")).style(memory_style(value, process))
+    if view_options.goblin_mode {
+        Span::from(format!("{art}")).style(memory_style(value, process))
+    } else {
+        Span::from(format!("{value:#018x}")).style(memory_style(value, process))
+    }
 }
 
 pub fn memory_style(addr: u64, process: &ProcessState) -> Style {
@@ -56,9 +63,10 @@ pub fn memory_style(addr: u64, process: &ProcessState) -> Style {
 pub fn telescope(
     tele: Vec<u64>,
     process: &ProcessState,
+    view_options: &ViewOptions,
     include_first: bool,
     prefix: String,
-) -> Line {
+) -> Line<'static> {
     let tele_len = tele.len();
 
     let mut tele: Vec<_> = tele
@@ -67,16 +75,18 @@ pub fn telescope(
         .skip(if include_first { 0 } else { 1 })
         .flat_map(|(i, maybe_addr)| {
             if i == (tele_len - 1) {
-                vec![Span::from(format!("{maybe_addr:#02x}"))
+                let display_guess =
+                    guess_display(maybe_addr, process, view_options).unwrap_or("".into());
+                vec![Span::from(format!("{maybe_addr:#02x} {display_guess}"))
                     .style(memory_style(maybe_addr, process))]
             } else if i == 0 {
                 vec![
-                    display_u64(maybe_addr, process),
+                    display_u64(maybe_addr, process, view_options),
                     Span::from(" ➝ ").style(Style::default()),
                 ]
             } else {
                 vec![
-                    display_u64(maybe_addr, process),
+                    display_u64(maybe_addr, process, view_options),
                     Span::from(" ➝ ").style(Style::default()),
                 ]
             }
@@ -87,4 +97,28 @@ pub fn telescope(
     l.extend(tele);
 
     Line::from(l)
+}
+
+pub fn guess_display(
+    val: u64,
+    process: &ProcessState,
+    view_options: &ViewOptions,
+) -> Option<String> {
+    let bytes = val.to_le_bytes();
+
+    let all_ascii = bytes.iter().all(|&b| b.is_ascii());
+    if all_ascii {
+        let valid_bytes: Vec<u8> = bytes.iter().filter(|&&b| b != 0).cloned().collect();
+
+        let mut ascii_string = String::from_utf8_lossy(&valid_bytes).into_owned();
+
+        if !ascii_string.is_empty() {
+            ascii_string.push_str("...");
+            Some(ascii_string)
+        } else {
+            None
+        }
+    } else {
+        None
+    }
 }

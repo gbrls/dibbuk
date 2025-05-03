@@ -7,17 +7,42 @@ use ratatui::crossterm::ExecutableCommand;
 use ratatui::prelude::*;
 use ratatui::widgets;
 use std::collections::HashMap;
-use std::ops::DerefMut;
+use std::ops::{DerefMut, Not};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tachyonfx::EffectRenderer;
 use tokio::{select, time};
 
 #[derive(Debug, Copy, Clone, Hash)]
+pub struct ViewOptions {
+    pub keybinds_shown: bool,
+    pub goblin_mode: bool,
+    pub mode: ViewMode,
+}
+
+impl ViewOptions {
+    fn new() -> Self {
+        Self {
+            keybinds_shown: true,
+            goblin_mode: false,
+            mode: ViewMode::default(),
+        }
+    }
+
+    fn toggle_goblin_mode(self) -> Self {
+        let mut opts = self;
+        opts.goblin_mode = opts.goblin_mode.not();
+        opts
+    }
+}
+
+#[derive(Debug, Copy, Clone, Hash)]
 pub enum UiEvent {
     Quit,
     ChangeInputMode(InputMode),
     ChangeViewMode(ViewMode),
+    ChangeViewOptions(ViewOptions),
+    ToggleKeybindHelper,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -49,6 +74,7 @@ pub trait Component {
     fn view(
         &mut self,
         process_state: &mut crate::process_ui::ProcessState,
+        view_options: &ViewOptions,
         frame: &mut Frame,
         rect: Rect,
         focused: bool,
@@ -61,7 +87,8 @@ pub trait Component {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Id {
     Logs,
-    Help,
+    Statusline,
+    HelpPopup,
     Registers,
     Disassembly,
     Welcome,
@@ -74,7 +101,7 @@ struct Model {
     pub app_data: crate::AppDataHandle,
     pub should_quit: bool,
     pub input_mode: InputMode,
-    pub view_mode: ViewMode,
+    pub view_options: ViewOptions,
     pub components: HashMap<Id, Arc<dyn Component>>,
     pub process_state: crate::process_ui::ProcessState,
     pub focus_stack: Vec<Id>,
@@ -87,8 +114,12 @@ impl Model {
         use crate::components;
         let components = [
             (
-                Id::Help,
-                Arc::new(components::help::Help::new()) as Arc<dyn Component>,
+                Id::HelpPopup,
+                Arc::new(components::keybind_help::HelpPopup::new()) as Arc<dyn Component>,
+            ),
+            (
+                Id::Statusline,
+                Arc::new(components::statusline::Statusline::new()) as Arc<dyn Component>,
             ),
             (
                 Id::GDbUserInput,
@@ -122,7 +153,7 @@ impl Model {
             app_data,
             should_quit: false,
             input_mode: InputMode::default(),
-            view_mode: ViewMode::default(),
+            view_options: ViewOptions::new(),
             components,
             process_state: crate::process_ui::ProcessState::new(),
             focus_stack: Vec::new(),
@@ -166,9 +197,12 @@ impl Model {
             (Normal, KeyCode::Char('q'), _) => Some(Quit),
             (Normal, KeyCode::Char('i'), _) => Some(ChangeInputMode(Insert)),
             (Normal, KeyCode::Char('v'), _) => Some(ChangeInputMode(Navigation)),
-
             (Normal, KeyCode::Char('0'), _) => Some(ChangeViewMode(ViewMode::DebugLogs)),
             (Normal, KeyCode::Char('1'), _) => Some(ChangeViewMode(ViewMode::Default)),
+            (Normal, KeyCode::Char(' '), _) => Some(ToggleKeybindHelper),
+            (Normal, KeyCode::Char('g'), _) => Some(ChangeViewOptions(
+                self.view_options.clone().toggle_goblin_mode(),
+            )),
 
             (Insert, KeyCode::Esc, _) => Some(ChangeInputMode(Normal)),
             (Navigation, KeyCode::Esc, _) => Some(ChangeInputMode(Normal)),
@@ -237,8 +271,22 @@ impl Model {
                 self.focus(&Id::Logs);
             }
 
+            UiEvent::ChangeViewOptions(opts) => {
+                self.view_options = opts;
+            }
+
             UiEvent::ChangeViewMode(mode) => {
-                self.view_mode = mode;
+                self.view_options.mode = mode;
+            }
+
+            UiEvent::ToggleKeybindHelper => {
+                self.view_options.keybinds_shown = self.view_options.keybinds_shown.not();
+
+                if self.view_options.keybinds_shown {
+                    self.focus(&Id::HelpPopup);
+                } else {
+                    self.unfocus();
+                }
             }
         }
 
@@ -249,17 +297,23 @@ impl Model {
         }
     }
 
-    fn view_layout(&mut self, frame: &mut Frame, layout: &UILayout) {
+    fn view_components(&mut self, frame: &mut Frame, layout: &UILayout) {
         let focused = self.focus_stack.last();
-        for (id, rect) in layout.sections.iter() {
-            Arc::get_mut(&mut self.components.get_mut(&id).unwrap())
-                .unwrap()
-                .view(
-                    &mut self.process_state,
-                    frame,
-                    *rect,
-                    focused.is_some() && focused.unwrap() == id,
-                );
+        for zlayer in layout.sections.iter() {
+            for (id, rect) in zlayer {
+                Arc::get_mut(&mut self.components.get_mut(&id).unwrap())
+                    .unwrap()
+                    .view(
+                        &mut self.process_state,
+                        &self.view_options,
+                        frame,
+                        *rect,
+                        focused.is_some() && focused.unwrap() == id,
+                    );
+            }
+            //if focused.is_some() && zlayer.contains_key(focused.unwrap()) {
+            //    break;
+            //}
         }
     }
 
@@ -267,17 +321,16 @@ impl Model {
         let focused = self.focus_stack.last();
 
         let ui_layout = UILayout::new(frame.area()).base();
-        let ui_layout = match self.view_mode {
+        let ui_layout = match self.view_options.mode {
             ViewMode::Default => ui_layout.main(),
             ViewMode::DebugLogs => ui_layout.fill(Id::Logs),
         };
 
-        self.view_layout(frame, &ui_layout);
+        self.view_components(frame, &ui_layout);
     }
 
     fn focus(&mut self, id: &Id) {
-        if !self.focus_stack.is_empty() && self.focus_stack.last().unwrap() == id {
-        } else {
+        if self.focus_stack.is_empty() || self.focus_stack.last().unwrap() != id {
             self.focus_stack.push(*id);
         }
     }
@@ -327,7 +380,7 @@ async fn main_loop<B: Backend>(app_data_handle: crate::AppDataHandle, mut term: 
                 model.process_state.tick(&model.app_data);
                 term.draw(|f| {
                     model.view(f, f.area());
-                    f.render_effect(&mut fx, f.area(), last_draw.elapsed().into());
+                    //f.render_effect(&mut fx, f.area(), last_draw.elapsed().into());
                     last_draw = Instant::now();
                 });
             }

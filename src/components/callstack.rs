@@ -1,7 +1,7 @@
 use crate::components::display_u64;
 use crate::mi2command::StackFrame;
 use crate::process_ui::ProcessState;
-use crate::tui::{InputMode, ViewMode};
+use crate::tui::{InputMode, ViewMode, ViewOptions};
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::prelude::*;
 use ratatui::widgets::*;
@@ -15,16 +15,26 @@ impl CallStack {
 }
 
 impl crate::tui::Component for CallStack {
-    fn view(&mut self, process: &mut ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
+    fn view(
+        &mut self,
+        process: &mut ProcessState,
+        view_options: &ViewOptions,
+        frame: &mut Frame,
+        rect: Rect,
+        focused: bool,
+    ) {
         if process.frames.is_none() {
             return;
         }
 
         let frames = process.frames.as_ref().unwrap().iter().map(|f| {
             Line::from(vec![
-                display_u64(f.addr, process),
-                Span::from(format!(" {}", f.function.clone().unwrap_or("??".to_owned())))
-                    .style(Style::default().dark_gray()),
+                display_u64(f.addr, process, view_options),
+                Span::from(format!(
+                    " {}",
+                    f.function.clone().unwrap_or("??".to_owned())
+                ))
+                .style(Style::default().dark_gray()),
             ])
         });
 

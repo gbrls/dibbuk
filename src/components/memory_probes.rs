@@ -1,7 +1,7 @@
 use crate::components::telescope;
 use crate::mi2command::StackFrame;
 use crate::process_ui::ProcessState;
-use crate::tui::{InputMode, ViewMode};
+use crate::tui::{InputMode, ViewMode, ViewOptions};
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::prelude::*;
 use ratatui::widgets::*;
@@ -52,7 +52,14 @@ fn bytes_u8(mem: &[u8]) -> String {
 }
 
 impl crate::tui::Component for MemoryProbes {
-    fn view(&mut self, process: &mut ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
+    fn view(
+        &mut self,
+        process: &mut ProcessState,
+        view_options: &ViewOptions,
+        frame: &mut Frame,
+        rect: Rect,
+        focused: bool,
+    ) {
         let items = process
             .memory_probes
             .iter()
@@ -65,7 +72,7 @@ impl crate::tui::Component for MemoryProbes {
                 } else {
                     let tele = tele.unwrap();
 
-                    vec![telescope(tele, &process, true, "".into())]
+                    vec![telescope(tele, &process, view_options, true, "".into())]
                 }
             });
         frame.render_widget(

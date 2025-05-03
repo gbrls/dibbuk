@@ -1,6 +1,7 @@
 use crate::components::display_u64;
 use crate::components::telescope;
 use crate::process_ui::ProcessState;
+use crate::tui::ViewOptions;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::prelude::*;
 use ratatui::widgets::*;
@@ -14,7 +15,14 @@ impl NRegisters {
 }
 
 impl crate::tui::Component for NRegisters {
-    fn view(&mut self, process: &mut ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
+    fn view(
+        &mut self,
+        process: &mut ProcessState,
+        view_options: &ViewOptions,
+        frame: &mut Frame,
+        rect: Rect,
+        focused: bool,
+    ) {
         let register_names = process.registers.keys();
         let state_message = Paragraph::new(format!(
             "rip -> {:#x}",
@@ -64,14 +72,14 @@ impl crate::tui::Component for NRegisters {
 
             let cells = vec![
                 Cell::from(reg_name).style(Style::default().white().bold()),
-                Cell::from(display_u64(value_or_addr, process)),
+                Cell::from(display_u64(value_or_addr, process, view_options)),
                 Cell::from(mem).style(Style::default().dark_gray()),
             ];
 
             let tele = process.telescope(value_or_addr, vec![]);
             if tele.is_some() {
                 let tele = tele.unwrap();
-                let tele = telescope(tele, &process, false, "  └ ".into());
+                let tele = telescope(tele, &process, view_options, false, "  └ ".into());
                 vec![
                     Row::new(cells).height(1),
                     Row::new(vec![Cell::from(String::new()), Cell::from(tele).dim()]),

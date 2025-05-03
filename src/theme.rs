@@ -5,6 +5,9 @@ use std::collections::HashMap;
 
 use crate::tui::Id;
 
+const ZDEFAULT: usize = 1;
+const ZPOPUP: usize = 4;
+
 pub fn border_focus(focus: bool) -> Style {
     match focus {
         true => Style::default().white().bold(),
@@ -24,17 +27,22 @@ pub fn memory_permissions(r: bool, w: bool, x: bool) -> Style {
     }
 }
 
-
 pub struct UILayout {
     pub unused: Vec<Rect>,
-    pub sections: HashMap<Id, Rect>,
+    pub sections: Vec<HashMap<Id, Rect>>,
 }
 
 impl UILayout {
     pub fn new(base: Rect) -> Self {
         UILayout {
             unused: vec![base],
-            sections: HashMap::new(),
+            sections: vec![
+                HashMap::new(),
+                HashMap::new(),
+                HashMap::new(),
+                HashMap::new(),
+                HashMap::new(),
+            ],
         }
     }
 
@@ -56,8 +64,9 @@ impl UILayout {
             )
             .split(root);
 
-        sections.insert(Id::GDbUserInput, chunks[0]);
-        sections.insert(Id::Help, chunks[2]);
+        sections[ZPOPUP].insert(Id::HelpPopup, root);
+        sections[ZDEFAULT].insert(Id::GDbUserInput, chunks[0]);
+        sections[ZDEFAULT].insert(Id::Statusline, chunks[2]);
         unused.push(chunks[1]);
 
         UILayout { unused, sections }
@@ -102,11 +111,11 @@ impl UILayout {
             )
             .split(chunks[0]);
 
-        sections.insert(Id::Disassembly, vchunks_left[0]);
-        sections.insert(Id::Callstack, vchunks_left[1]);
-        sections.insert(Id::Registers, vchunks_right[0]);
-        sections.insert(Id::MemoryProbes, vchunks_right[1]);
-        sections.insert(Id::Logs, vchunks_right[2]);
+        sections[ZDEFAULT].insert(Id::Disassembly, vchunks_left[0]);
+        sections[ZDEFAULT].insert(Id::Callstack, vchunks_left[1]);
+        sections[ZDEFAULT].insert(Id::Registers, vchunks_right[0]);
+        sections[ZDEFAULT].insert(Id::MemoryProbes, vchunks_right[1]);
+        sections[ZDEFAULT].insert(Id::Logs, vchunks_right[2]);
 
         UILayout { unused, sections }
     }
@@ -116,7 +125,7 @@ impl UILayout {
         let mut sections = self.sections;
         let root = unused.pop().unwrap();
 
-        sections.insert(id, root);
+        sections[4].insert(id, root);
 
         UILayout { unused, sections }
     }
@@ -125,14 +134,14 @@ impl UILayout {
         let mut unused = self.unused;
         let mut sections = self.sections;
 
-        let rect = sections.get(&id).unwrap();
+        let rect = sections[4].get(&id).unwrap();
 
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Max(20), Constraint::Percentage(80)].as_ref())
             .split(*rect);
 
-        sections.insert(id, chunks[0]);
+        sections[4].insert(id, chunks[0]);
 
         UILayout { unused, sections }
     }

@@ -1,6 +1,7 @@
 use crate::parser::MiRecord;
 use crate::process_ui::ProcessState;
 use crate::theme;
+use crate::tui::ViewOptions;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::prelude::*;
 use ratatui::widgets::*;
@@ -21,14 +22,21 @@ impl Logs {
     pub fn new() -> Self {
         Logs {
             history: Vec::new(),
-            view_mode: LogsMode::Verbose,
+            view_mode: LogsMode::JustConsole,
             list_state: ListState::default(),
         }
     }
 }
 
 impl crate::tui::Component for Logs {
-    fn view(&mut self, process: &mut ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
+    fn view(
+        &mut self,
+        process: &mut ProcessState,
+        view_options: &ViewOptions,
+        frame: &mut Frame,
+        rect: Rect,
+        focused: bool,
+    ) {
         let lines = self.history.iter().enumerate().map(|(i, l)| {
             let style = if l.starts_with("GdbMi") {
                 Style::default().dark_gray()

@@ -1,5 +1,6 @@
 use crate::components::display_u64;
 use crate::process_ui::ProcessState;
+use crate::tui::ViewOptions;
 use crate::Disassembly;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::prelude::*;
@@ -49,18 +50,25 @@ fn instructions_view_window(
     addrs.into_iter().skip(to_skip).collect()
 }
 
-fn display_operand(s: &str, process: &ProcessState) -> Span<'static> {
+fn display_operand(s: &str, process: &ProcessState, view_options: &ViewOptions) -> Span<'static> {
     let maybe_base16 = u64::from_str_radix(s.strip_prefix("0x").unwrap_or(""), 16);
     let has_commas = s.contains(",");
 
     match (has_commas, maybe_base16) {
-        (_, Ok(val)) => Span::from(display_u64(val, process)),
+        (_, Ok(val)) => Span::from(display_u64(val, process, view_options)),
         _ => Span::from(s.to_string()).style(Style::default().fg(Color::White)),
     }
 }
 
 impl crate::tui::Component for Disasm {
-    fn view(&mut self, process: &mut ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
+    fn view(
+        &mut self,
+        process: &mut ProcessState,
+        view_options: &ViewOptions,
+        frame: &mut Frame,
+        rect: Rect,
+        focused: bool,
+    ) {
         let instruction_pointer = process.registers.get("rip").cloned();
 
         let (addrs, cs_addrs) = if instruction_pointer.is_some() {
@@ -102,6 +110,7 @@ impl crate::tui::Component for Disasm {
             let operand = display_operand(
                 disasm.operand.as_ref().unwrap_or(&String::new()).as_str(),
                 process,
+                view_options,
             );
 
             let style = match instruction_pointer {
@@ -112,7 +121,10 @@ impl crate::tui::Component for Disasm {
             };
 
             let cells = vec![
-                Cell::from(display_u64(disasm.offset as u64, process).style(Style::default())),
+                Cell::from(
+                    display_u64(disasm.offset as u64, process, view_options)
+                        .style(Style::default()),
+                ),
                 Cell::from(mnemonic),
                 Cell::from(operand),
             ];

@@ -1,18 +1,18 @@
 use crate::process_ui::ProcessState;
-use crate::tui::{InputMode, ViewMode};
+use crate::tui::{InputMode, ViewMode, ViewOptions};
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::prelude::*;
 use ratatui::widgets;
 
-pub struct Help {
+pub struct Statusline {
     contents: String,
     view_mode: ViewMode,
     input_mode: InputMode,
 }
 
-impl Help {
+impl Statusline {
     pub fn new() -> Self {
-        Help {
+        Statusline {
             contents: String::from("hello?"),
             view_mode: ViewMode::default(),
             input_mode: InputMode::default(),
@@ -20,8 +20,15 @@ impl Help {
     }
 }
 
-impl crate::tui::Component for Help {
-    fn view(&mut self, process: &mut ProcessState, frame: &mut Frame, rect: Rect, focused: bool) {
+impl crate::tui::Component for Statusline {
+    fn view(
+        &mut self,
+        process: &mut ProcessState,
+        view_options: &ViewOptions,
+        frame: &mut Frame,
+        rect: Rect,
+        focused: bool,
+    ) {
         let input_mode_color = match self.input_mode {
             InputMode::Insert => Color::Red,
             InputMode::Normal => Color::Blue,
@@ -63,12 +70,6 @@ impl crate::tui::Component for Help {
     }
     fn handle_ui_event(&mut self, event: &crate::tui::UiEvent) {
         match event {
-            crate::tui::UiEvent::ChangeInputMode(input_mode) => {
-                self.input_mode = *input_mode;
-            }
-            crate::tui::UiEvent::ChangeViewMode(view_mode) => {
-                self.view_mode = *view_mode;
-            }
             _ => {}
         }
     }
