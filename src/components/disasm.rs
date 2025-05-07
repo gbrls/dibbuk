@@ -71,7 +71,7 @@ impl crate::tui::Component for Disasm {
     ) {
         let instruction_pointer = process.registers.get("rip").cloned();
 
-        let (addrs, cs_addrs) = if instruction_pointer.is_some() {
+        let (_, cs_addrs) = if instruction_pointer.is_some() {
             (
                 instructions_view_window(&process.disassembly, instruction_pointer.unwrap()),
                 instructions_view_window(&process.cs_disassembly, instruction_pointer.unwrap()),
@@ -90,7 +90,7 @@ impl crate::tui::Component for Disasm {
             ret
         };
 
-        let meta = format!("{}/{}", addrs.len(), cs_addrs.len());
+        let meta = format!("{}", cs_addrs.len());
         let header_cells = ["Address".into(), meta, "operand".into()]
             .into_iter()
             .map(|h| Cell::from(h).style(Style::default().bold()));

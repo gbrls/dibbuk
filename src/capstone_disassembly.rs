@@ -26,7 +26,8 @@ pub fn disasm_in_map(map: &MemMap, pid: u64, offset: usize) -> HashMap<u64, Disa
     let MemMap { map_range: map } = map;
     let mut instructions = HashMap::new();
     if map.is_exec() {
-        match read_process_memory::copy_address(map.start(), map.size(), &h) {
+        match read_process_memory::copy_address(map.start() + offset, map.size(), &h) { // maybe
+            // offset is incorrect
             Ok(mem) => match cs.disasm_all(mem.as_slice(), (map.start() + offset) as u64) {
                 Ok(cs) => {
                     //println!("csok! {:?}", cs);
