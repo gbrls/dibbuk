@@ -1,3 +1,10 @@
+- parse elf to show disassembly locations
+- tree structure to dynamically change layout
+    - different layout for thing vs long frame
+- memory view
+- display memory contents based on heuristics
+    - print full string
+    - disasm
 - syscall / call args display
 - jkhl navigation in visual mode
 - pince / ce interface
