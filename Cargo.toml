@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-goblin = "0.9.3"
 thiserror = "2.0.12"
 anyhow = "1.0"
 tokio = { version = "1", features = ["full"] }
@@ -22,3 +21,4 @@ console-subscriber = "0.4.1"
 read-process-memory = "0.1.6"
 tachyonfx = { version = "0.13.0", features = ["sendable"] }
 capstone = "0.13.0"
+elf = "0.7.4"

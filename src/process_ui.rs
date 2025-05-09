@@ -3,9 +3,9 @@ use crate::{AppEvent, Disassembly, GdbMessage, GdbState, MemMap, StackFrame};
 use proc_maps::get_process_maps;
 use read_process_memory::CopyAddress;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{self, PathBuf};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ProcessState {
     pub frames: Option<Vec<StackFrame>>,
     pub gdb_execution_state: GdbState,
@@ -17,6 +17,7 @@ pub struct ProcessState {
     pub memory_probes: HashMap<String, (u64, Vec<u8>)>,
     pub child_pid: Option<u64>,
     pub environment_cwd: Option<PathBuf>,
+    pub elfs: HashMap<String, crate::elf::Elf>,
 }
 
 impl ProcessState {
@@ -32,6 +33,7 @@ impl ProcessState {
             memory_probes: HashMap::new(),
             child_pid: None,
             environment_cwd: None,
+            elfs: HashMap::new(),
         }
     }
 
@@ -197,6 +199,23 @@ impl ProcessState {
     fn update_memory_maps(&mut self, event: &AppEvent) {
         match event {
             AppEvent::Gdb(GdbMessage::Maps(mps)) => {
+                mps.iter()
+                    .filter(|mp| mp.map_range.filename().is_some())
+                    .for_each(|m| {
+                        let f = m.map_range.filename().unwrap();
+                        let path_str = f.as_os_str().to_str().unwrap();
+                        if !self.elfs.contains_key(path_str) {
+                            match crate::elf::Elf::new(path_str) {
+                                Ok(elf) => {
+                                    self.elfs.insert(path_str.to_string(), elf);
+                                }
+                                Err(e) => {
+                                    //println!("{} {:?}", path_str, e);
+                                }
+                            }
+                        }
+                    });
+
                 self.memory_maps = Some(mps.clone());
             }
 

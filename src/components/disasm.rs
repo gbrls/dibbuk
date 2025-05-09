@@ -120,18 +120,71 @@ impl crate::tui::Component for Disasm {
                 None => Style::default(),
             };
 
-            let cells = vec![
+            let meta = match (
+                &disasm.mnemonic,
+                disasm.operand.as_ref().and_then(|op| {
+                    u64::from_str_radix(op.strip_prefix("0x").unwrap_or(""), 16).ok()
+                }),
+            ) {
+                // FIXME: this code is bad
+                (Some(s), Some(op_addr)) if (s.as_str() == "call") => {
+                    //let symbol = process
+                    //    .elfs
+                    //    .iter()
+                    //    .find_map(|(_, elf)| elf.symbols.get(&addr));
+
+                    let symbol = process
+                        .elfs
+                        .iter()
+                        .flat_map(|(_, elf)| elf.symbols.iter())
+                        .fold(None, |acc: Option<(u64, &str)>, (addr, sym)| {
+                            if *addr >= op_addr && addr.abs_diff(op_addr) <= 8 {
+                                let diff = addr - op_addr;
+                                if acc.is_none() || (acc.is_some() && acc.unwrap().0 < *addr) {
+                                    Some((diff, sym.as_str()))
+                                } else {
+                                    acc
+                                }
+                            } else {
+                                acc
+                            }
+                        });
+                    if symbol.is_some() {
+                        symbol.unwrap().1.to_string()
+                    } else {
+                        format!("")
+                        //format!("not found")
+                        //format!(
+                        //    "not found {:?}",
+                        //    process
+                        //        .elfs
+                        //        .iter()
+                        //        .map(|(_, elf)| &elf.symbols)
+                        //        .collect::<Vec<_>>()
+                        //)
+                    }
+                }
+                _ => String::new(),
+            };
+
+            let collumns = vec![
                 Cell::from(
                     display_u64(disasm.offset as u64, process, view_options)
                         .style(Style::default()),
                 ),
                 Cell::from(mnemonic),
                 Cell::from(operand),
+                Cell::from(meta).style(Style::default().dark_gray()),
             ];
-            Row::new(cells).height(1).style(style)
+            Row::new(collumns).height(1).style(style)
         });
 
-        let widths = [Constraint::Max(20), Constraint::Max(8), Constraint::Min(10)];
+        let widths = [
+            Constraint::Max(20),
+            Constraint::Max(8),
+            Constraint::Min(10),
+            Constraint::Min(10),
+        ];
 
         let tmp = vec![];
         let top = process

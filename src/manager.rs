@@ -26,6 +26,7 @@ pub async fn run(mut data: crate::AppDataHandle) {
                         .send(GetDisassemblyRel(32, 128))
                         .unwrap();
 
+                    data.channels.gdb_stdin_tx.send(ThreadInfo).unwrap();
                     data.channels.gdb_stdin_tx.send(ListStackFrames).unwrap();
 
                     if main_pid.is_some() {

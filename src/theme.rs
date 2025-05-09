@@ -56,7 +56,6 @@ impl UILayout {
             .direction(Direction::Vertical)
             .constraints(
                 [
-                    Constraint::Max(3),         // input
                     Constraint::Percentage(92), // ...
                     Constraint::Max(1),         // statusbar
                 ]
@@ -65,9 +64,8 @@ impl UILayout {
             .split(root);
 
         sections[ZPOPUP].insert(Id::HelpPopup, root);
-        sections[ZDEFAULT].insert(Id::GDbUserInput, chunks[0]);
-        sections[ZDEFAULT].insert(Id::Statusline, chunks[2]);
-        unused.push(chunks[1]);
+        sections[ZDEFAULT].insert(Id::Statusline, chunks[1]);
+        unused.push(chunks[0]);
 
         UILayout { unused, sections }
     }
@@ -95,6 +93,7 @@ impl UILayout {
                     Constraint::Percentage(60), //  regs
                     Constraint::Percentage(20), //  memory
                     Constraint::Percentage(20), //  logs
+                    Constraint::Min(3),         // input
                 ]
                 .as_ref(),
             )
@@ -116,6 +115,9 @@ impl UILayout {
         sections[ZDEFAULT].insert(Id::Registers, vchunks_right[0]);
         sections[ZDEFAULT].insert(Id::MemoryProbes, vchunks_right[1]);
         sections[ZDEFAULT].insert(Id::Logs, vchunks_right[2]);
+
+        sections[ZDEFAULT].insert(Id::GDbUserInput, vchunks_right[3]);
+        //sections[ZDEFAULT].insert(Id::GDbUserInput, vchunks_right[2]);
 
         UILayout { unused, sections }
     }
