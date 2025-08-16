@@ -1,3 +1,4 @@
+- g: rodar run dnv quebra o disassembly
 - /home/gbrls/ctf/rop_emporium/dir_pivot/pivot
     - wrong disasm
     - the wrong disasm only seem to happen when returning from a continue.

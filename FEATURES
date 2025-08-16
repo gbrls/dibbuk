@@ -1,4 +1,10 @@
+- make cli gdb compatible
+- show related symbol when argument is an exact match, like `call rax; malloc@plt`
+
+
 - parse elf to show disassembly locations
+- add addr offset to disasm
+- place input at the bottom
 - tree structure to dynamically change layout
     - different layout for thing vs long frame
 - memory view
