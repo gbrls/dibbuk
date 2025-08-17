@@ -1,4 +1,4 @@
-use crate::parser::MiRecord;
+use crate::gdb::parser::MiRecord;
 use crate::process_ui::ProcessState;
 use crate::theme;
 use crate::tui::ViewOptions;

@@ -1,9 +1,10 @@
-use crate::{Disassembly, MemMap};
+use crate::il::{self, Disassembly, MemMap};
 use capstone::prelude::*;
 use std::collections::HashMap;
 
 pub fn capstone2dbk(ins: &capstone::Insn) -> Disassembly {
     Disassembly {
+        source: il::DisassemblyEngine::CS,
         str: format!("{}", ins.op_str().unwrap()),
         operand: Some(format!("{}", ins.op_str().unwrap())),
         mnemonic: Some(format!("{}", ins.mnemonic().unwrap())),
@@ -26,7 +27,8 @@ pub fn disasm_in_map(map: &MemMap, pid: u64, offset: usize) -> HashMap<u64, Disa
     let MemMap { map_range: map } = map;
     let mut instructions = HashMap::new();
     if map.is_exec() {
-        match read_process_memory::copy_address(map.start() + offset, map.size(), &h) { // maybe
+        match read_process_memory::copy_address(map.start() + offset, map.size(), &h) {
+            // maybe
             // offset is incorrect
             Ok(mem) => match cs.disasm_all(mem.as_slice(), (map.start() + offset) as u64) {
                 Ok(cs) => {

@@ -1,21 +1,12 @@
+pub mod capstone_disassembly;
 pub mod components;
 pub mod elf;
-pub mod manager;
-pub mod mi2command;
-pub mod parser;
-pub mod process;
+pub mod event_loop;
+pub mod gdb;
+pub mod il;
+pub mod process_ui;
 pub mod theme;
 pub mod tui;
-pub mod process_ui;
-pub mod capstone_disassembly;
-
-
-pub use mi2command::GdbContext;
-pub use mi2command::GdbMessage;
-pub use mi2command::StackFrame;
-pub use mi2command::GdbState;
-pub use mi2command::MemMap;
-pub use mi2command::Disassembly;
 
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
@@ -23,8 +14,12 @@ use tokio::sync::mpsc;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-use clap::builder::styling;
 use clap::builder::Styles;
+use clap::builder::styling;
+
+use gdb::lift_mi::*;
+use gdb::parser;
+use gdb::process;
 
 fn my_styles() -> Styles {
     styling::Styles::styled()
@@ -33,7 +28,6 @@ fn my_styles() -> Styles {
         .literal(styling::AnsiColor::Blue.on_default() | styling::Effects::BOLD)
         .placeholder(styling::AnsiColor::Cyan.on_default())
 }
-
 
 #[derive(Parser, Debug, Clone)]
 #[command(styles(my_styles()))]
@@ -46,9 +40,18 @@ pub struct CliArgs {
     debug: u8,
 }
 
+impl CliArgs {
+    pub fn new() -> Self {
+        Self {
+            file: None,
+            debug: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Eq)]
 pub enum AppEvent {
-    Gdb(GdbMessage),
+    IL(il::Message),
     Log(String),
     GdbMi(parser::MiRecord),
     ReadMemory(u64, u64),
@@ -61,7 +64,7 @@ impl PartialEq for AppEvent {
         match (self, other) {
             (AppEvent::Any, _) => true,
             (_, AppEvent::Any) => true,
-            (AppEvent::Gdb(gdb_self), AppEvent::Gdb(gdb_other)) => gdb_self == gdb_other,
+            (AppEvent::IL(gdb_self), AppEvent::IL(gdb_other)) => gdb_self == gdb_other,
             (AppEvent::GdbMi(a), AppEvent::GdbMi(b)) => a == b,
             (_, _) => false,
         }
@@ -76,7 +79,7 @@ impl PartialOrd for AppEvent {
 
 #[derive(Debug)]
 pub struct AppState {
-    pub gdb_ctx: GdbContext,
+    pub gdb_ctx: GdbLifterContext,
     pub cli_args: CliArgs,
 }
 
@@ -114,7 +117,10 @@ impl AppDataHandle {
     }
 
     pub fn try_read_mem(&self, addr: u64, len: u64) {
-        self.channels.event_tx.send(AppEvent::ReadMemory(addr, len)).unwrap();
+        self.channels
+            .event_tx
+            .send(AppEvent::ReadMemory(addr, len))
+            .unwrap();
     }
 }
 
@@ -131,7 +137,7 @@ impl App {
         let (gdb_mi_tx, _) = tokio::sync::broadcast::channel(64);
         let (event_tx, _) = tokio::sync::broadcast::channel(64);
         let state = std::sync::Arc::new(tokio::sync::RwLock::new(AppState {
-            gdb_ctx: GdbContext::new(),
+            gdb_ctx: GdbLifterContext::new(),
             cli_args: cli.clone(),
         }));
 

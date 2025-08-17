@@ -1,25 +1,21 @@
-// File: src/mi_parser.rs with fixes for parsing stack frames
-
+use nom::Parser;
 use nom::bytes::complete::take_while;
-use nom::Parser; // Make sure this is imported
 
 use nom::{
+    Finish, IResult,
     branch::alt,
     bytes::complete::{escaped_transform, is_not, tag, take_while1},
-    character::complete::{char, digit1, multispace0, one_of}, // Added one_of for escapes
+    character::complete::{char, digit1, multispace0, one_of},
     combinator::{cut, map, map_res, opt, recognize, value},
-    error::{context, ParseError}, // For adding context to errors
+    error::{ParseError, context},
     multi::separated_list0,
     sequence::{delimited, preceded, separated_pair, tuple},
-    Finish, // Added Finish for testing convenience
-    IResult,
 };
-// Using HashMap as per user's provided code for top-level results
+
 use std::collections::HashMap;
 
-// --- Type Definitions (Merged into this file as per user request) ---
-
 /// Represents a fully parsed GDB MI Record (Output Line).
+/// source: https://sourceware.org/gdb/current/onlinedocs/gdb.html/GDB_002fMI-Output-Syntax.html#GDB_002fMI-Output-Syntax
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MiRecord {
     Result(ResultRecord),
@@ -67,8 +63,6 @@ pub enum MiValue {
     List(Vec<MiValue>),
 }
 
-// --- Main Parser Entry Point ---
-
 /// Parses a single line of GDB MI output into an `MiRecord`.
 /// Assumes input does not contain the trailing newline.
 pub fn parse_mi_line(input: &str) -> IResult<&str, MiRecord> {
@@ -77,7 +71,6 @@ pub fn parse_mi_line(input: &str) -> IResult<&str, MiRecord> {
         return Ok(("", MiRecord::GdbPrompt));
     }
 
-    // Use standard nom functional style
     context(
         "MI Record",
         alt((
@@ -88,23 +81,19 @@ pub fn parse_mi_line(input: &str) -> IResult<&str, MiRecord> {
             map(parse_console_stream, MiRecord::ConsoleStream),
             map(parse_target_stream, MiRecord::TargetStream),
             map(parse_log_stream, MiRecord::LogStream),
-            // Fallback last - recognize consumes till end or error
             map(recognize(nom::combinator::rest), |s: &str| {
                 MiRecord::Unknown(s.to_string())
             }),
         )),
     )
-    .parse(input) // Apply the parser to the input here
+    .parse(input)
 }
-
-// --- Record Type Parsers ---
-// Reverted to standard nom chaining style, removing extraneous .parse() calls
 
 fn parse_result_record(input: &str) -> IResult<&str, ResultRecord> {
     context("Result Record", |i| {
         let (i, token) = preceded(char('^'), parse_optional_token).parse(i)?;
         let (i, class) = parse_identifier(i)?;
-        // Use cut here? Maybe not, results are optional.
+
         let (i, results) = parse_optional_results_list(i)?;
         Ok((
             i,
@@ -172,9 +161,7 @@ fn parse_notify_async_record(input: &str) -> IResult<&str, AsyncRecord> {
     .parse(input)
 }
 
-// --- Stream Parsers ---
 fn parse_console_stream(input: &str) -> IResult<&str, String> {
-    // Use cut after '~' - if we see '~', it MUST be followed by a valid string
     context(
         "Console Stream",
         preceded(char('~'), cut(parse_mi_string_value)),
@@ -196,9 +183,7 @@ fn parse_log_stream(input: &str) -> IResult<&str, String> {
     .parse(input)
 }
 
-// --- Core Component Parsers ---
 fn parse_optional_token(input: &str) -> IResult<&str, Option<u64>> {
-    // This is simple enough, doesn't need context usually
     opt(map_res(digit1, |s: &str| s.parse::<u64>())).parse(input)
 }
 
@@ -206,7 +191,6 @@ fn parse_identifier(input: &str) -> IResult<&str, String> {
     context(
         "Identifier",
         map(
-            // MI Identifiers can contain letters, digits, hyphens, underscores
             take_while1(|c: char| c.is_alphanumeric() || c == '-' || c == '_'),
             |s: &str| s.to_string(),
         ),
@@ -219,15 +203,13 @@ fn parse_optional_results_list(input: &str) -> IResult<&str, HashMap<String, MiV
     context("Optional Results List", |i| {
         let (i, maybe_results_vec) = opt(preceded(
             char(','),
-            // Use cut: if comma is present, we expect a valid results list
             cut(separated_list0(char(','), parse_key_value_pair)),
         ))
         .parse(i)?;
 
-        // Convert the Vec<(String, MiValue)> to HashMap as requested
         let results_map = match maybe_results_vec {
             Some(pairs) => pairs.into_iter().collect(),
-            None => HashMap::new(), // Empty map if no results
+            None => HashMap::new(),
         };
         Ok((i, results_map))
     })
@@ -236,19 +218,12 @@ fn parse_optional_results_list(input: &str) -> IResult<&str, HashMap<String, MiV
 
 /// Parses a single key=value pair.
 fn parse_key_value_pair(input: &str) -> IResult<&str, (String, MiValue)> {
-    // Use context and cut for better errors after '='
     context(
         "Key-Value Pair",
-        separated_pair(
-            parse_identifier, // Key
-            cut(char('=')),   // Expect '=' after key
-            parse_value,      // Value (recursive)
-        ),
+        separated_pair(parse_identifier, cut(char('=')), parse_value),
     )
     .parse(input)
 }
-
-// --- Value Parsers (Implemented) ---
 
 fn parse_value(input: &str) -> IResult<&str, MiValue> {
     context(
@@ -268,23 +243,18 @@ fn parse_mi_string_value(input: &str) -> IResult<&str, String> {
         "MI String",
         delimited(
             char('"'),
-            // Use cut: If opening quote is found, expect valid string content and closing quote
             cut(opt(escaped_transform(
-                // Normal characters: any char except control chars \ or "
                 is_not("\\\""),
-                // Control character: \
                 '\\',
-                // Parser for escape sequences
                 alt((
-                    value("\"", char('"')),  // \" -> "
-                    value("\\", char('\\')), // \\ -> \
-                    value("\n", char('n')),  // \n -> newline
-                    value("\t", char('t')),  // \t -> tab
-                    value("\r", char('r')),  // \r -> carriage return
-                    value("\'", char('\'')), // \' -> ' (GDB MI spec doesn't list this but pygdbmi handles it)
+                    value("\"", char('"')),
+                    value("\\", char('\\')),
+                    value("\n", char('n')),
+                    value("\t", char('t')),
+                    value("\r", char('r')),
+                    value("\'", char('\'')),
                 )),
             ))),
-            // Expect a closing quote
             cut(char('"')),
         ),
     )
@@ -307,9 +277,7 @@ fn parse_tuple(input: &str) -> IResult<&str, Vec<(String, MiValue)>> {
         "Tuple",
         delimited(
             char('{'),
-            // Use cut after opening brace
             cut(separated_list0(char(','), parse_key_value_pair)),
-            // Expect closing brace
             cut(char('}')),
         ),
     )
@@ -317,34 +285,27 @@ fn parse_tuple(input: &str) -> IResult<&str, Vec<(String, MiValue)>> {
 }
 
 /// Parses an MI List: [ value, value, ... ]
-/// FIXED: This function now handles lists that contain tuples (including "frame={...}")
+
 fn parse_list(input: &str) -> IResult<&str, Vec<MiValue>> {
     context(
         "List",
         delimited(
             char('['),
-            // Use cut after opening bracket
             cut(separated_list0(
                 char(','),
-                // This is the key fix: Handle both direct values and key=value tuples
                 alt((
-                    // Handle "frame={...}" case - this is actually a "key=value" pair inside a list!
                     map(parse_key_value_pair, |(key, value)| {
-                        // Convert the key-value pair to a Tuple with a single entry
                         MiValue::Tuple(vec![(key, value)])
                     }),
-                    // Regular value case (recursive call)
                     parse_value,
                 )),
             )),
-            // Expect closing bracket
             cut(char(']')),
         ),
     )
     .parse(input)
 }
 
-// Add a test function to verify our fix works
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -356,15 +317,12 @@ mod tests {
         let result = parse_mi_line(input);
         assert!(result.is_ok(), "Failed to parse: {:?}", result);
 
-        // Check that it actually got parsed correctly
         if let Ok((_, MiRecord::Result(record))) = result {
             assert_eq!(record.class, "done");
 
-            // Check that stack is there
             let stack = record.results.get("stack");
             assert!(stack.is_some(), "Stack not found in results");
 
-            // Check that stack is a list with 2 frames
             if let Some(MiValue::List(frames)) = stack {
                 assert_eq!(frames.len(), 2, "Expected 2 frames, got {}", frames.len());
             } else {
@@ -375,4 +333,3 @@ mod tests {
         }
     }
 }
-

@@ -1,8 +1,7 @@
-use dibbuk::{
-    manager, mi2command,
-    process::{self, StdinCommand},
-    tui, App, CliArgs,
-};
+use dibbuk::{App, CliArgs, event_loop, tui};
+
+use dibbuk::gdb;
+use dibbuk::gdb::process::{self, StdinCommand};
 
 use clap::{Parser, Subcommand};
 
@@ -40,8 +39,8 @@ async fn main() {
         app.gdb_mi_tx.clone(),
         app.data_handle(),
     )); // WARN: occupies a large amount of space 1536 bytes
-    let app_handle = tokio::spawn(mi2command::run(app.data_handle()));
-    let mgr_handle = tokio::spawn(manager::run(app.data_handle()));
+    let app_handle = tokio::spawn(gdb::lift_mi::run(app.data_handle()));
+    let mgr_handle = tokio::spawn(event_loop::update(app.data_handle()));
 
     //let local = tokio::task::LocalSet::new();
     //let tui_handle = local.spawn_local(tui::run(app.data_handle())); // WARN: never yielded

@@ -7,18 +7,18 @@ pub fn read_memory_bytes(pid: u64, addr: u64, size: u64) -> Vec<u8> {
     read_process_memory::copy_address(addr as usize, size as usize, &h).unwrap()
 }
 
-pub async fn run(mut data: crate::AppDataHandle) {
-    use crate::mi2command::GdbMessage::*;
-    use crate::mi2command::GdbState;
-    use crate::process::StdinCommand::*;
+pub async fn update(mut data: crate::AppDataHandle) {
     use crate::AppEvent::*;
+    use crate::il::ExecutionState;
+    use crate::il::Message::*;
+    use crate::process::StdinCommand::*;
 
     let mut main_pid = None;
 
     loop {
         while let Ok(cmd) = data.channels.event_rx.recv().await {
             match cmd {
-                Gdb(StateUpdate(GdbState::Stopped)) => {
+                IL(StateUpdate(ExecutionState::Stopped)) => {
                     data.channels.gdb_stdin_tx.send(GetRegisterUpdates).unwrap();
 
                     data.channels
@@ -34,29 +34,30 @@ pub async fn run(mut data: crate::AppDataHandle) {
                         if let Ok(maps) = get_process_maps(pid as i32) {
                             data.channels
                                 .event_tx
-                                .send(Gdb(Maps(
+                                .send(IL(Maps(
                                     maps.into_iter()
-                                        .map(|m| crate::mi2command::MemMap { map_range: m })
+                                        .map(|m| crate::il::MemMap { map_range: m })
                                         .collect(),
                                 )))
                                 .unwrap();
                         }
                     }
                 }
-                Gdb(UpdatedRegisters(ids)) => {
-                    data.channels
-                        .gdb_stdin_tx
-                        .send(GetRegisterValues(ids))
-                        .unwrap();
+                IL(UpdatedRegisters(ids)) => {
+                    // FIXME: update there since we now are working with the higher level IR
+                    // data.channels
+                    //     .gdb_stdin_tx
+                    //     .send(GetRegisterValues(ids))
+                    //     .unwrap();
                 }
-                Gdb(Pid(pid)) => {
+                IL(Pid(pid)) => {
                     main_pid = Some(pid);
                     if let Ok(maps) = get_process_maps(pid as i32) {
                         data.channels
                             .event_tx
-                            .send(Gdb(Maps(
+                            .send(IL(Maps(
                                 maps.into_iter()
-                                    .map(|m| crate::mi2command::MemMap { map_range: m })
+                                    .map(|m| crate::il::MemMap { map_range: m })
                                     .collect(),
                             )))
                             .unwrap();

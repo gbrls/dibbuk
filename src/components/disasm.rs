@@ -1,13 +1,11 @@
 use crate::components::display_u64;
+use crate::il::Disassembly;
 use crate::process_ui::ProcessState;
 use crate::tui::ViewOptions;
-use crate::Disassembly;
-use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::Event;
 use ratatui::prelude::*;
 use ratatui::widgets::*;
 use std::collections::HashMap;
-use std::fmt::format;
-use std::time::{Duration, SystemTime};
 
 pub struct Disasm {}
 
@@ -101,11 +99,13 @@ impl crate::tui::Component for Disasm {
             .bottom_margin(1);
 
         let rows = cs_addrs.iter().enumerate().map(|(i, (row_addr, disasm))| {
-            let mnemonic = Line::from(vec![Span::from(format!(
-                "{} ",
-                disasm.mnemonic.as_ref().unwrap_or(&String::new())
-            ))
-            .style(Style::default().fg(Color::Green))]);
+            let mnemonic = Line::from(vec![
+                Span::from(format!(
+                    "{} ",
+                    disasm.mnemonic.as_ref().unwrap_or(&String::new())
+                ))
+                .style(Style::default().fg(Color::Green)),
+            ]);
 
             let operand = display_operand(
                 disasm.operand.as_ref().unwrap_or(&String::new()).as_str(),
@@ -174,7 +174,7 @@ impl crate::tui::Component for Disasm {
                 ),
                 Cell::from(mnemonic),
                 Cell::from(operand),
-                Cell::from(meta).style(Style::default().dark_gray()),
+                Cell::from(meta).style(Style::default().blue().bold()),
             ];
             Row::new(collumns).height(1).style(style)
         });

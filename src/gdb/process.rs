@@ -1,13 +1,13 @@
 // src/main.rs (or relevant module)
 
-use crate::parser;
+use crate::gdb::parser;
 use std::io::Write; // For flushing standard streams
 use std::process::Stdio;
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::{
-    io::{stdin, AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader, stdin},
     process::{Child, ChildStderr, ChildStdin, ChildStdout, Command},
 };
 
@@ -65,7 +65,7 @@ pub struct MiOutput {
 }
 
 /// Spawns a GDB process configured for MI interaction. (Same as before)
-pub async fn spawn_gdb_process(
+pub fn spawn_gdb_process(
     gdb_path: &str,
     cli_args: &crate::CliArgs,
 ) -> Result<GdbIo, GdbProcessError> {
@@ -129,7 +129,7 @@ pub async fn run_event_loop(
         handle.cli_args.clone()
     };
 
-    let gdb_io_result = spawn_gdb_process("gdb", &cli_args).await;
+    let gdb_io_result = spawn_gdb_process("gdb", &cli_args);
 
     let mut gdb_io = match gdb_io_result {
         Ok(io) => io,
@@ -264,6 +264,7 @@ pub async fn run_event_loop(
     eprintln!("--- GDB MI Proxy End ---");
 }
 
+// TODO: move this to IR lowering phase
 async fn gdb_commands_loop(mut gdb_stdin: ChildStdin, mut cmd_rx: UnboundedReceiver<StdinCommand>) {
     while let Some(cmd) = cmd_rx.recv().await {
         use StdinCommand::*;
@@ -303,6 +304,56 @@ async fn gdb_commands_loop(mut gdb_stdin: ChildStdin, mut cmd_rx: UnboundedRecei
         if let Err(e) = gdb_stdin.flush().await {
             eprintln!("Error flushing GDB stdin: {}. Stopping command loop.", e);
             break; // Exit loop on flush error
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::time::{Duration, timeout};
+
+    #[tokio::test]
+    async fn gdb_spawn_process() {
+        assert!(spawn_gdb_process("gdb", &crate::CliArgs::new()).is_ok());
+    }
+
+    #[tokio::test]
+    async fn gdb_process_stdout() {
+        let gdb_io = spawn_gdb_process("gdb", &crate::CliArgs::new()).unwrap();
+        let mut stdout_reader = gdb_io.stdout_reader;
+
+        let stdout_handle = tokio::spawn(async move {
+            let mut line_buf = String::new();
+            loop {
+                line_buf.clear();
+                match stdout_reader.read_line(&mut line_buf).await {
+                    Ok(0) => {
+                        println!("\n[Proxy Info] GDB stdout stream ended.");
+                        break;
+                    }
+                    Ok(_) => {
+                        println!("Command {line_buf:?}");
+                        if line_buf.contains("(gdb)") {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("\n[Proxy Error] Error reading GDB stdout: {}", e);
+                        break;
+                    }
+                }
+            }
+        });
+
+        match timeout(Duration::from_millis(500), stdout_handle).await {
+            Ok(Ok(_)) => {}
+            Ok(Err(join_err)) => {
+                panic!("stdout_handle task panicked: {join_err}");
+            }
+            Err(_) => {
+                panic!("stdout_handle did not get (gdb) prompt fast enough");
+            }
         }
     }
 }

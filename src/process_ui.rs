@@ -1,5 +1,6 @@
 use crate::AppDataHandle;
-use crate::{AppEvent, Disassembly, GdbMessage, GdbState, MemMap, StackFrame};
+use crate::AppEvent;
+use crate::il::{Disassembly, ExecutionState, MemMap, Message, StackFrame};
 use proc_maps::get_process_maps;
 use read_process_memory::CopyAddress;
 use std::collections::HashMap;
@@ -8,7 +9,7 @@ use std::path::{self, PathBuf};
 #[derive(Debug)]
 pub struct ProcessState {
     pub frames: Option<Vec<StackFrame>>,
-    pub gdb_execution_state: GdbState,
+    pub gdb_execution_state: ExecutionState,
     pub registers: HashMap<String, u64>,
     pub memory_maps: Option<Vec<MemMap>>,
     pub disassembly: HashMap<u64, Disassembly>,
@@ -24,7 +25,7 @@ impl ProcessState {
     pub fn new() -> Self {
         Self {
             frames: None,
-            gdb_execution_state: GdbState::default(),
+            gdb_execution_state: ExecutionState::default(),
             registers: HashMap::new(),
             memory_maps: None,
             disassembly: HashMap::new(),
@@ -55,7 +56,7 @@ impl ProcessState {
 
     pub fn update_pid(&mut self, event: &AppEvent) {
         match event {
-            AppEvent::Gdb(GdbMessage::Pid(pid)) => {
+            AppEvent::IL(Message::Pid(pid)) => {
                 self.child_pid = Some(*pid);
             }
             _ => {}
@@ -99,7 +100,7 @@ impl ProcessState {
 
     pub fn ask_update_mem(&self, event: &AppEvent, app: &AppDataHandle) {
         match event {
-            AppEvent::Gdb(_) => {
+            AppEvent::IL(_) => {
                 for (reg_name, maybe_addr) in self.registers.iter() {
                     if let Some(_map) = self.addr_memory_map(*maybe_addr) {
                         app.try_read_mem(*maybe_addr, 8);
@@ -171,7 +172,7 @@ impl ProcessState {
 
     fn update_disassembly(&mut self, event: &AppEvent) {
         match event {
-            AppEvent::Gdb(GdbMessage::DisassemblyNative(asm_lines)) => {
+            AppEvent::IL(Message::Disassembly(asm_lines)) => {
                 for asm in asm_lines.iter() {
                     self.disassembly.insert(asm.addr as u64, asm.clone());
                 }
@@ -182,7 +183,7 @@ impl ProcessState {
 
     fn update_registers(&mut self, event: &AppEvent) {
         match event {
-            AppEvent::Gdb(GdbMessage::RegisterValue(regsv)) => {
+            AppEvent::IL(Message::RegisterValue(regsv)) => {
                 for (k, v) in regsv.iter() {
                     self.registers.insert(k.clone(), *v);
                     let rmem = self.read_memory_bytes(*v, 128);
@@ -198,7 +199,7 @@ impl ProcessState {
 
     fn update_memory_maps(&mut self, event: &AppEvent) {
         match event {
-            AppEvent::Gdb(GdbMessage::Maps(mps)) => {
+            AppEvent::IL(Message::Maps(mps)) => {
                 mps.iter()
                     .filter(|mp| mp.map_range.filename().is_some())
                     .for_each(|m| {
@@ -225,7 +226,7 @@ impl ProcessState {
 
     fn update_callstack(&mut self, event: &AppEvent) {
         match event {
-            AppEvent::Gdb(GdbMessage::StackFrames(frames)) => {
+            AppEvent::IL(Message::StackFrames(frames)) => {
                 self.frames = Some(frames.clone());
                 self.frames.as_mut().unwrap().sort_by_key(|f| f.depth);
             }
@@ -235,7 +236,7 @@ impl ProcessState {
 
     fn update_cwd(&mut self, event: &AppEvent) {
         match event {
-            AppEvent::Gdb(GdbMessage::Cwd(cwd)) => {
+            AppEvent::IL(Message::Cwd(cwd)) => {
                 self.environment_cwd = PathBuf::try_from(cwd).ok();
             }
             _ => {}

@@ -1,5 +1,4 @@
 use crate::components::telescope;
-use crate::mi2command::StackFrame;
 use crate::process_ui::ProcessState;
 use crate::tui::{InputMode, ViewMode, ViewOptions};
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
