@@ -1,9 +1,10 @@
+use crate::il;
 use crate::theme::UILayout;
 use futures_util::{FutureExt, StreamExt};
 use ratatui::crossterm;
+use ratatui::crossterm::ExecutableCommand;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
-use ratatui::crossterm::ExecutableCommand;
 use ratatui::prelude::*;
 use ratatui::widgets;
 use std::collections::HashMap;
@@ -207,43 +208,42 @@ impl Model {
             (Insert, KeyCode::Esc, _) => Some(ChangeInputMode(Normal)),
             (Navigation, KeyCode::Esc, _) => Some(ChangeInputMode(Normal)),
 
-            (Normal, KeyCode::Char('j'), _) => {
-                self.app_data
-                    .channels
-                    .gdb_stdin_tx
-                    .send(crate::process::StdinCommand::NextInstruction)
-                    .unwrap();
+            // (Normal, KeyCode::Char('j'), _) => {
+            //     self.app_data
+            //         .channels
+            //         .stdin_tx
+            //         .send(il::DebuggerCommand::NextInstruction)
+            //         .unwrap();
 
-                None
-            }
-            (Normal, KeyCode::Char('l'), _) => {
-                self.app_data
-                    .channels
-                    .gdb_stdin_tx
-                    .send(crate::process::StdinCommand::StepInstruction)
-                    .unwrap();
+            //     None
+            // }
+            // (Normal, KeyCode::Char('l'), _) => {
+            //     self.app_data
+            //         .channels
+            //         .stdin_tx
+            //         .send(il::DebuggerCommand::StepInstruction)
+            //         .unwrap();
 
-                None
-            }
-            (Normal, KeyCode::Char('h'), _) => {
-                self.app_data
-                    .channels
-                    .gdb_stdin_tx
-                    .send(crate::process::StdinCommand::Finish)
-                    .unwrap();
+            //     None
+            // }
+            // (Normal, KeyCode::Char('h'), _) => {
+            //     self.app_data
+            //         .channels
+            //         .stdin_tx
+            //         .send(il::DebuggerCommand::Finish)
+            //         .unwrap();
 
-                None
-            }
-            (Normal, KeyCode::Enter, _) => {
-                self.app_data
-                    .channels
-                    .gdb_stdin_tx
-                    .send(crate::process::StdinCommand::Continue)
-                    .unwrap();
+            //     None
+            // }
+            // (Normal, KeyCode::Enter, _) => {
+            //     self.app_data
+            //         .channels
+            //         .stdin_tx
+            //         .send(il::DebuggerCommand::Continue)
+            //         .unwrap();
 
-                None
-            }
-
+            //     None
+            // }
             _ => None,
         }
     }

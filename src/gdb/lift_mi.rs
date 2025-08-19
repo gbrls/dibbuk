@@ -19,6 +19,9 @@ pub enum LiftError {
     Multiple(Vec<LiftError>),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum LowerError {}
+
 impl GdbLifterContext {
     pub fn new() -> Self {
         Self {
@@ -27,7 +30,7 @@ impl GdbLifterContext {
         }
     }
 
-    pub fn lift_asm_insns(result: &ResultRecord) -> Result<Option<il::Message>, LiftError> {
+    pub fn lift_asm_insns(result: &ResultRecord) -> Result<Option<il::DebuggerEvent>, LiftError> {
         // [mi] Result(ResultRecord { token: None, class: "done", results: {"asm_insns": List([Tuple([("address", Const("0x00005555555555d5")), ("func-name", Const("main")), ("offset", Const("5")), ("inst", Const("push   %r13"))])
         use super::parser::*;
         use il::*;
@@ -75,12 +78,12 @@ impl GdbLifterContext {
                 }
             }
 
-            Ok(Some(Message::Disassembly(asm_lines)))
+            Ok(Some(DebuggerEvent::Disassembly(asm_lines)))
         } else {
             Err(LiftError::ExpectedList(String::from("asm_insns")))
         }
     }
-    pub fn lift_threads(result: &ResultRecord) -> Result<Option<il::Message>, LiftError> {
+    pub fn lift_threads(result: &ResultRecord) -> Result<Option<il::DebuggerEvent>, LiftError> {
         use super::parser::*;
         use il::*;
         if let MiValue::List(tuple_list) = result.results.get("threads").unwrap() {
@@ -96,7 +99,7 @@ impl GdbLifterContext {
                                     && let Ok(pid) = pid_str.as_str().parse::<u64>()
                                 {
                                     // TODO: is this sound? is it safe to always return the first target-id that is found?
-                                    return Ok(Some(Message::Pid(pid)));
+                                    return Ok(Some(DebuggerEvent::Pid(pid)));
                                 }
                             }
                             _ => {}
@@ -110,7 +113,7 @@ impl GdbLifterContext {
         }
     }
 
-    pub fn lift_stack(result: &ResultRecord) -> Result<Option<il::Message>, LiftError> {
+    pub fn lift_stack(result: &ResultRecord) -> Result<Option<il::DebuggerEvent>, LiftError> {
         use super::parser::*;
         use il::*;
         if let MiValue::List(tuple_list) = result.results.get("stack").unwrap() {
@@ -170,7 +173,7 @@ impl GdbLifterContext {
                 }
             }
 
-            Ok(Some(il::Message::StackFrames(frames)))
+            Ok(Some(il::DebuggerEvent::StackFrames(frames)))
         } else {
             Err(LiftError::ExpectedList(String::from("stack")))
         }
@@ -191,7 +194,7 @@ impl GdbLifterContext {
     pub fn lift_changed_registers(
         &self,
         result: &ResultRecord,
-    ) -> Result<Option<il::Message>, LiftError> {
+    ) -> Result<Option<il::DebuggerEvent>, LiftError> {
         use super::parser::*;
         use il::*;
 
@@ -218,7 +221,7 @@ impl GdbLifterContext {
                 Err(LiftError::Multiple(errs))
             } else {
                 // TODO: this fails silently in case of register ids that aren't mapped
-                Ok(Some(Message::UpdatedRegisters(
+                Ok(Some(DebuggerEvent::UpdatedRegisters(
                     register_ids
                         .iter()
                         .filter_map(|id| self.register_name.get(id.as_ref().unwrap()))
@@ -234,7 +237,7 @@ impl GdbLifterContext {
     pub fn lift_register_values(
         &self,
         result: &ResultRecord,
-    ) -> Result<Option<il::Message>, LiftError> {
+    ) -> Result<Option<il::DebuggerEvent>, LiftError> {
         use super::parser::*;
         use il::*;
 
@@ -274,13 +277,13 @@ impl GdbLifterContext {
                 }
             }
 
-            Ok(Some(Message::RegisterValue(register_values)))
+            Ok(Some(DebuggerEvent::RegisterValue(register_values)))
         } else {
             Err(LiftError::ExpectedList("register-values".into()))
         }
     }
 
-    pub fn lift(&mut self, value: MiRecord) -> Result<Option<il::Message>, LiftError> {
+    pub fn lift(&mut self, value: MiRecord) -> Result<Option<il::DebuggerEvent>, LiftError> {
         use super::parser::*;
         use il::*;
 
@@ -295,11 +298,11 @@ impl GdbLifterContext {
                 use ExecutionState::*;
                 match (class.as_str(), reason) {
                     ("stopped", Some(MiValue::Const(reason))) if reason.as_str() == "exited" => {
-                        Ok(Some(Message::StateUpdate(Exited)))
+                        Ok(Some(DebuggerEvent::StateUpdate(Exited)))
                     }
 
-                    ("stopped", _) => Ok(Some(Message::StateUpdate(Stopped))),
-                    ("running", _) => Ok(Some(Message::StateUpdate(Running))),
+                    ("stopped", _) => Ok(Some(DebuggerEvent::StateUpdate(Stopped))),
+                    ("running", _) => Ok(Some(DebuggerEvent::StateUpdate(Running))),
                     (_, _) => Ok(None),
                 }
             }
@@ -319,7 +322,7 @@ impl GdbLifterContext {
             // ││[12] GdbMi(Result(ResultRecord { token: None, class: "done", results: {"cwd": Const("/home/gbrls/Documents/vr-src/v8")} }))
             MiRecord::Result(ResultRecord { results, .. }) if results.contains_key("cwd") => {
                 if let MiValue::Const(cwd) = results.get("cwd").unwrap() {
-                    Ok(Some(il::Message::Cwd(cwd.clone())))
+                    Ok(Some(il::DebuggerEvent::Cwd(cwd.clone())))
                 } else {
                     Err(LiftError::ExpectedString(String::from("cwd")))
                 }
@@ -354,24 +357,35 @@ impl GdbLifterContext {
             _ => Ok(None),
         }
     }
-}
 
-pub async fn run(mut data: crate::AppDataHandle) {
-    loop {
-        while let Ok(cmd) = data.channels.gdb_mi_rx.recv().await {
-            // always send raw mi commands first
-            //if cmd.mi.is_some() {
-            //    data.channels
-            //        .event_tx
-            //        .send(GdbMi(cmd.mi.clone().unwrap()))
-            //        .unwrap();
-            //}
-
-            match cmd.mi {
-                None => {}
-
-                _ => {}
+    pub fn lower(&self, command: &il::DebuggerCommand) -> Result<String, LowerError> {
+        use il::DebuggerCommand::*;
+        match command {
+            AddBreakpoint(loc) => Ok(format!("-break-insert {}", loc)),
+            Run => Ok("-exec-run".into()),
+            StartI => Ok("starti".into()),
+            StepInstruction => Ok("-exec-step-instruction".into()),
+            NextInstruction => Ok("-exec-next-instruction".into()),
+            ThreadInfo => Ok("-thread-info".into()),
+            Finish => Ok("-exec-finish".into()),
+            InfoOs => Ok("-info-os".into()),
+            Continue => Ok("-exec-continue".into()),
+            ListStackFrames => Ok("-stack-list-frames".into()),
+            GetRegisterNames => Ok("-data-list-register-names".into()),
+            GetAllRegisterValues => Ok("-data-list-register-values x".into()),
+            GetRegisterValues(ids) => {
+                let mut base = "-data-list-register-values x".to_string();
+                for id in ids {
+                    base.push_str(&format!(" {}", id))
+                }
+                Ok(base)
             }
+            GetRegisterUpdates => Ok("-data-list-changed-registers".into()),
+            GetDisassemblyRel(start, end) => {
+                Ok({ format!("-data-disassemble -s \"$pc-{}\" -e \"$pc+{}\"", start, end) })
+            }
+            Quit => Ok("exit".into()),
+            Raw(s) => Ok(s.clone()),
         }
     }
 }
@@ -393,7 +407,9 @@ mod tests {
                 class: "stopped".into(),
                 results: HashMap::new(),
             })),
-            Ok(Some(il::Message::StateUpdate(il::ExecutionState::Stopped)))
+            Ok(Some(il::DebuggerEvent::StateUpdate(
+                il::ExecutionState::Stopped
+            )))
         );
     }
 }

@@ -9,9 +9,9 @@ pub fn read_memory_bytes(pid: u64, addr: u64, size: u64) -> Vec<u8> {
 
 pub async fn update(mut data: crate::AppDataHandle) {
     use crate::AppEvent::*;
+    use crate::il::DebuggerCommand::*;
+    use crate::il::DebuggerEvent::*;
     use crate::il::ExecutionState;
-    use crate::il::Message::*;
-    use crate::process::StdinCommand::*;
 
     let mut main_pid = None;
 
@@ -19,15 +19,17 @@ pub async fn update(mut data: crate::AppDataHandle) {
         while let Ok(cmd) = data.channels.event_rx.recv().await {
             match cmd {
                 IL(StateUpdate(ExecutionState::Stopped)) => {
-                    data.channels.gdb_stdin_tx.send(GetRegisterUpdates).unwrap();
+                    // TODO: changing event types
+                    // data.channels.stdin_tx.send(GetRegisterUpdates).unwrap();
 
-                    data.channels
-                        .gdb_stdin_tx
-                        .send(GetDisassemblyRel(32, 128))
-                        .unwrap();
+                    // data.channels
+                    // .stdin_tx
+                    // .send(GetDisassemblyRel(32, 128))
+                    // .unwrap();
 
-                    data.channels.gdb_stdin_tx.send(ThreadInfo).unwrap();
-                    data.channels.gdb_stdin_tx.send(ListStackFrames).unwrap();
+                    // TODO: changing event types
+                    // data.channels.stdin_tx.send(ThreadInfo).unwrap();
+                    // data.channels.stdin_tx.send(ListStackFrames).unwrap();
 
                     if main_pid.is_some() {
                         let pid = main_pid.unwrap();

@@ -1,5 +1,6 @@
 pub mod capstone_disassembly;
 pub mod components;
+pub mod debugger;
 pub mod elf;
 pub mod event_loop;
 pub mod gdb;
@@ -51,7 +52,7 @@ impl CliArgs {
 
 #[derive(Debug, Clone, Eq)]
 pub enum AppEvent {
-    IL(il::Message),
+    IL(il::DebuggerEvent),
     Log(String),
     GdbMi(parser::MiRecord),
     ReadMemory(u64, u64),
@@ -85,8 +86,8 @@ pub struct AppState {
 
 #[derive(Debug)]
 pub struct AppChannels {
-    gdb_stdin_tx: mpsc::UnboundedSender<process::StdinCommand>,
-    gdb_mi_rx: broadcast::Receiver<process::MiOutput>,
+    stdin_tx: mpsc::UnboundedSender<String>,
+    stdout_rx: broadcast::Receiver<String>,
     event_tx: broadcast::Sender<AppEvent>,
     event_rx: broadcast::Receiver<AppEvent>,
 }
@@ -100,16 +101,16 @@ pub struct AppDataHandle {
 impl AppDataHandle {
     pub fn new(
         state: std::sync::Arc<tokio::sync::RwLock<AppState>>,
-        gdb_stdin_tx: mpsc::UnboundedSender<process::StdinCommand>,
-        gdb_mi_rx: broadcast::Receiver<process::MiOutput>,
+        stdin_tx: mpsc::UnboundedSender<String>,
+        stdout_rx: broadcast::Receiver<String>,
         event_rx: broadcast::Receiver<AppEvent>,
         event_tx: broadcast::Sender<AppEvent>,
     ) -> Self {
         Self {
             state,
             channels: AppChannels {
-                gdb_stdin_tx,
-                gdb_mi_rx,
+                stdin_tx,
+                stdout_rx,
                 event_tx,
                 event_rx,
             },
@@ -125,14 +126,14 @@ impl AppDataHandle {
 }
 
 pub struct App {
-    pub gdb_stdin_tx: mpsc::UnboundedSender<process::StdinCommand>,
-    pub gdb_mi_tx: broadcast::Sender<process::MiOutput>,
+    pub stdin_tx: mpsc::UnboundedSender<String>,
+    pub stdout_tx: broadcast::Sender<String>,
     pub state: std::sync::Arc<tokio::sync::RwLock<AppState>>,
     pub event_tx: broadcast::Sender<AppEvent>,
 }
 
 impl App {
-    pub fn new(cli: &CliArgs) -> (Self, mpsc::UnboundedReceiver<process::StdinCommand>) {
+    pub fn new(cli: &CliArgs) -> (Self, mpsc::UnboundedReceiver<String>) {
         let (gdb_stdin_tx, gdb_stdin_rx) = tokio::sync::mpsc::unbounded_channel();
         let (gdb_mi_tx, _) = tokio::sync::broadcast::channel(64);
         let (event_tx, _) = tokio::sync::broadcast::channel(64);
@@ -143,8 +144,8 @@ impl App {
 
         (
             Self {
-                gdb_stdin_tx,
-                gdb_mi_tx,
+                stdin_tx: gdb_stdin_tx,
+                stdout_tx: gdb_mi_tx,
                 event_tx,
                 state,
             },
@@ -155,8 +156,8 @@ impl App {
     pub fn data_handle(&self) -> AppDataHandle {
         AppDataHandle::new(
             self.state.clone(),
-            self.gdb_stdin_tx.clone(),
-            self.gdb_mi_tx.subscribe(),
+            self.stdin_tx.clone(),
+            self.stdout_tx.subscribe(),
             self.event_tx.subscribe(),
             self.event_tx.clone(),
         )

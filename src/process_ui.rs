@@ -1,6 +1,6 @@
 use crate::AppDataHandle;
 use crate::AppEvent;
-use crate::il::{Disassembly, ExecutionState, MemMap, Message, StackFrame};
+use crate::il::{DebuggerEvent, Disassembly, ExecutionState, MemMap, StackFrame};
 use proc_maps::get_process_maps;
 use read_process_memory::CopyAddress;
 use std::collections::HashMap;
@@ -56,7 +56,7 @@ impl ProcessState {
 
     pub fn update_pid(&mut self, event: &AppEvent) {
         match event {
-            AppEvent::IL(Message::Pid(pid)) => {
+            AppEvent::IL(DebuggerEvent::Pid(pid)) => {
                 self.child_pid = Some(*pid);
             }
             _ => {}
@@ -172,7 +172,7 @@ impl ProcessState {
 
     fn update_disassembly(&mut self, event: &AppEvent) {
         match event {
-            AppEvent::IL(Message::Disassembly(asm_lines)) => {
+            AppEvent::IL(DebuggerEvent::Disassembly(asm_lines)) => {
                 for asm in asm_lines.iter() {
                     self.disassembly.insert(asm.addr as u64, asm.clone());
                 }
@@ -183,7 +183,7 @@ impl ProcessState {
 
     fn update_registers(&mut self, event: &AppEvent) {
         match event {
-            AppEvent::IL(Message::RegisterValue(regsv)) => {
+            AppEvent::IL(DebuggerEvent::RegisterValue(regsv)) => {
                 for (k, v) in regsv.iter() {
                     self.registers.insert(k.clone(), *v);
                     let rmem = self.read_memory_bytes(*v, 128);
@@ -199,7 +199,7 @@ impl ProcessState {
 
     fn update_memory_maps(&mut self, event: &AppEvent) {
         match event {
-            AppEvent::IL(Message::Maps(mps)) => {
+            AppEvent::IL(DebuggerEvent::Maps(mps)) => {
                 mps.iter()
                     .filter(|mp| mp.map_range.filename().is_some())
                     .for_each(|m| {
@@ -226,7 +226,7 @@ impl ProcessState {
 
     fn update_callstack(&mut self, event: &AppEvent) {
         match event {
-            AppEvent::IL(Message::StackFrames(frames)) => {
+            AppEvent::IL(DebuggerEvent::StackFrames(frames)) => {
                 self.frames = Some(frames.clone());
                 self.frames.as_mut().unwrap().sort_by_key(|f| f.depth);
             }
@@ -236,7 +236,7 @@ impl ProcessState {
 
     fn update_cwd(&mut self, event: &AppEvent) {
         match event {
-            AppEvent::IL(Message::Cwd(cwd)) => {
+            AppEvent::IL(DebuggerEvent::Cwd(cwd)) => {
                 self.environment_cwd = PathBuf::try_from(cwd).ok();
             }
             _ => {}

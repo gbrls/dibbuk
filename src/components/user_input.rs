@@ -71,8 +71,9 @@ impl crate::tui::Component for UserInput {
                     self.history.push(String::new());
                 }
 
-                let tx = crate::process::StdinCommand::Input(cmd.clone());
-                app_data_handle.channels.gdb_stdin_tx.send(tx).unwrap();
+                // TODO: changing event types
+                // let tx = crate::il::DebuggerCommand::Raw(cmd.clone());
+                // app_data_handle.channels.stdin_tx.send(tx).unwrap();
                 app_data_handle
                     .channels
                     .event_tx

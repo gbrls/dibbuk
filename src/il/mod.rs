@@ -63,7 +63,7 @@ pub struct StackFrame {
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq)]
-pub enum Message {
+pub enum DebuggerEvent {
     Pid(u64),
     Maps(Vec<MemMap>),
     RegisterValue(Vec<(String, u64)>),
@@ -72,4 +72,25 @@ pub enum Message {
     Disassembly(Vec<Disassembly>),
     StackFrames(Vec<StackFrame>),
     Cwd(String),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum DebuggerCommand {
+    AddBreakpoint(String),
+    Raw(String),
+    StepInstruction,
+    StartI,
+    NextInstruction,
+    ListStackFrames,
+    ThreadInfo,
+    Finish,
+    Continue,
+    Run,
+    InfoOs,
+    GetRegisterNames,
+    GetAllRegisterValues,
+    GetRegisterValues(Vec<usize>),
+    GetRegisterUpdates,
+    GetDisassemblyRel(u64, u64),
+    Quit,
 }
