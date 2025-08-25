@@ -17,6 +17,7 @@ pub enum LiftError {
     ExpectedString(String),
     InvalidRegisterId(String),
     Multiple(Vec<LiftError>),
+    InvalidMI,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -30,7 +31,7 @@ impl GdbLifterContext {
         }
     }
 
-    pub fn lift_asm_insns(result: &ResultRecord) -> Result<Option<il::DebuggerEvent>, LiftError> {
+    pub fn lift_asm_insns(result: &ResultRecord) -> Result<il::DebuggerEvent, LiftError> {
         // [mi] Result(ResultRecord { token: None, class: "done", results: {"asm_insns": List([Tuple([("address", Const("0x00005555555555d5")), ("func-name", Const("main")), ("offset", Const("5")), ("inst", Const("push   %r13"))])
         use super::parser::*;
         use il::*;
@@ -78,12 +79,12 @@ impl GdbLifterContext {
                 }
             }
 
-            Ok(Some(DebuggerEvent::Disassembly(asm_lines)))
+            Ok(DebuggerEvent::Disassembly(asm_lines))
         } else {
             Err(LiftError::ExpectedList(String::from("asm_insns")))
         }
     }
-    pub fn lift_threads(result: &ResultRecord) -> Result<Option<il::DebuggerEvent>, LiftError> {
+    pub fn lift_threads(result: &ResultRecord) -> Result<il::DebuggerEvent, LiftError> {
         use super::parser::*;
         use il::*;
         if let MiValue::List(tuple_list) = result.results.get("threads").unwrap() {
@@ -99,7 +100,7 @@ impl GdbLifterContext {
                                     && let Ok(pid) = pid_str.as_str().parse::<u64>()
                                 {
                                     // TODO: is this sound? is it safe to always return the first target-id that is found?
-                                    return Ok(Some(DebuggerEvent::Pid(pid)));
+                                    return Ok(DebuggerEvent::Pid(pid));
                                 }
                             }
                             _ => {}
@@ -107,13 +108,13 @@ impl GdbLifterContext {
                     }
                 }
             }
-            Ok(None)
+            Ok(DebuggerEvent::Tick)
         } else {
             Err(LiftError::ExpectedList(String::from("threads")))
         }
     }
 
-    pub fn lift_stack(result: &ResultRecord) -> Result<Option<il::DebuggerEvent>, LiftError> {
+    pub fn lift_stack(result: &ResultRecord) -> Result<il::DebuggerEvent, LiftError> {
         use super::parser::*;
         use il::*;
         if let MiValue::List(tuple_list) = result.results.get("stack").unwrap() {
@@ -173,7 +174,7 @@ impl GdbLifterContext {
                 }
             }
 
-            Ok(Some(il::DebuggerEvent::StackFrames(frames)))
+            Ok(il::DebuggerEvent::StackFrames(frames))
         } else {
             Err(LiftError::ExpectedList(String::from("stack")))
         }
@@ -194,7 +195,7 @@ impl GdbLifterContext {
     pub fn lift_changed_registers(
         &self,
         result: &ResultRecord,
-    ) -> Result<Option<il::DebuggerEvent>, LiftError> {
+    ) -> Result<il::DebuggerEvent, LiftError> {
         use super::parser::*;
         use il::*;
 
@@ -221,13 +222,13 @@ impl GdbLifterContext {
                 Err(LiftError::Multiple(errs))
             } else {
                 // TODO: this fails silently in case of register ids that aren't mapped
-                Ok(Some(DebuggerEvent::UpdatedRegisters(
+                Ok(DebuggerEvent::UpdatedRegisters(
                     register_ids
                         .iter()
                         .filter_map(|id| self.register_name.get(id.as_ref().unwrap()))
                         .cloned()
                         .collect(),
-                )))
+                ))
             }
         } else {
             Err(LiftError::ExpectedList("changed-registers".into()))
@@ -237,7 +238,7 @@ impl GdbLifterContext {
     pub fn lift_register_values(
         &self,
         result: &ResultRecord,
-    ) -> Result<Option<il::DebuggerEvent>, LiftError> {
+    ) -> Result<il::DebuggerEvent, LiftError> {
         use super::parser::*;
         use il::*;
 
@@ -277,13 +278,13 @@ impl GdbLifterContext {
                 }
             }
 
-            Ok(Some(DebuggerEvent::RegisterValue(register_values)))
+            Ok(DebuggerEvent::RegisterValue(register_values))
         } else {
             Err(LiftError::ExpectedList("register-values".into()))
         }
     }
 
-    pub fn lift(&mut self, value: MiRecord) -> Result<Option<il::DebuggerEvent>, LiftError> {
+    pub fn lift(&mut self, value: MiRecord) -> Result<il::DebuggerEvent, LiftError> {
         use super::parser::*;
         use il::*;
 
@@ -298,12 +299,12 @@ impl GdbLifterContext {
                 use ExecutionState::*;
                 match (class.as_str(), reason) {
                     ("stopped", Some(MiValue::Const(reason))) if reason.as_str() == "exited" => {
-                        Ok(Some(DebuggerEvent::StateUpdate(Exited)))
+                        Ok(DebuggerEvent::StateUpdate(Exited))
                     }
 
-                    ("stopped", _) => Ok(Some(DebuggerEvent::StateUpdate(Stopped))),
-                    ("running", _) => Ok(Some(DebuggerEvent::StateUpdate(Running))),
-                    (_, _) => Ok(None),
+                    ("stopped", _) => Ok(DebuggerEvent::StateUpdate(Stopped)),
+                    ("running", _) => Ok(DebuggerEvent::StateUpdate(Running)),
+                    (_, _) => Ok(DebuggerEvent::Tick),
                 }
             }
 
@@ -322,7 +323,7 @@ impl GdbLifterContext {
             // ││[12] GdbMi(Result(ResultRecord { token: None, class: "done", results: {"cwd": Const("/home/gbrls/Documents/vr-src/v8")} }))
             MiRecord::Result(ResultRecord { results, .. }) if results.contains_key("cwd") => {
                 if let MiValue::Const(cwd) = results.get("cwd").unwrap() {
-                    Ok(Some(il::DebuggerEvent::Cwd(cwd.clone())))
+                    Ok(il::DebuggerEvent::Cwd(cwd.clone()))
                 } else {
                     Err(LiftError::ExpectedString(String::from("cwd")))
                 }
@@ -339,7 +340,7 @@ impl GdbLifterContext {
             {
                 // TODO: maybe send just the register names from IL?
                 let _ = self.update_register_names(result);
-                Ok(None)
+                Ok(DebuggerEvent::Tick)
             }
 
             MiRecord::Result(result @ ResultRecord { results, .. })
@@ -354,7 +355,7 @@ impl GdbLifterContext {
                 //Tuple([("number", Const("0")), ("value", Const("0x5555555555d0"))]),
                 self.lift_register_values(result)
             }
-            _ => Ok(None),
+            _ => Ok(DebuggerEvent::Tick),
         }
     }
 
@@ -407,9 +408,7 @@ mod tests {
                 class: "stopped".into(),
                 results: HashMap::new(),
             })),
-            Ok(Some(il::DebuggerEvent::StateUpdate(
-                il::ExecutionState::Stopped
-            )))
+            Ok(il::DebuggerEvent::StateUpdate(il::ExecutionState::Stopped))
         );
     }
 }

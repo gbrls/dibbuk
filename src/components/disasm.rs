@@ -217,12 +217,7 @@ impl crate::tui::Component for Disasm {
         let mut table_state = ratatui::widgets::TableState::default().with_selected(selected);
         frame.render_stateful_widget(register_table, rect, &mut table_state);
     }
-    fn handle_app_event(
-        &mut self,
-        event: &crate::AppEvent,
-        app_data_handle: &crate::AppDataHandle,
-    ) {
-    }
-    fn handle_terminal_event(&mut self, event: &Event, app_data_handle: &crate::AppDataHandle) {}
+    fn handle_app_event(&mut self, event: &crate::AppEvent, app_data_handle: &crate::TxChannels) {}
+    fn handle_terminal_event(&mut self, event: &Event, app_data_handle: &crate::TxChannels) {}
     fn handle_ui_event(&mut self, event: &crate::tui::UiEvent) {}
 }

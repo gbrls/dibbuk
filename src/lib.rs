@@ -1,14 +1,15 @@
 pub mod capstone_disassembly;
-pub mod components;
+// pub mod components;
 pub mod debugger;
 pub mod elf;
 pub mod event_loop;
 pub mod gdb;
 pub mod il;
 pub mod process_ui;
-pub mod theme;
-pub mod tui;
+// pub mod theme;
+// pub mod tui;
 
+use futures::channel::mpsc::UnboundedReceiver;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 
@@ -21,6 +22,14 @@ use clap::builder::styling;
 use gdb::lift_mi::*;
 use gdb::parser;
 use gdb::process;
+
+pub trait IOTask {
+    fn start(
+        self,
+        rx: mpsc::UnboundedReceiver<String>,
+        tx: broadcast::Sender<String>,
+    ) -> tokio::task::JoinHandle<()>;
+}
 
 fn my_styles() -> Styles {
     styling::Styles::styled()
@@ -79,87 +88,39 @@ impl PartialOrd for AppEvent {
 }
 
 #[derive(Debug)]
-pub struct AppState {
-    pub gdb_ctx: GdbLifterContext,
-    pub cli_args: CliArgs,
+pub struct RxChannels {
+    pub stdout_rx: broadcast::Receiver<String>,
+    pub event_rx: broadcast::Receiver<AppEvent>,
 }
 
-#[derive(Debug)]
-pub struct AppChannels {
-    stdin_tx: mpsc::UnboundedSender<String>,
-    stdout_rx: broadcast::Receiver<String>,
-    event_tx: broadcast::Sender<AppEvent>,
-    event_rx: broadcast::Receiver<AppEvent>,
-}
-
-#[derive(Debug)]
-pub struct AppDataHandle {
-    channels: AppChannels,
-    state: std::sync::Arc<tokio::sync::RwLock<AppState>>,
-}
-
-impl AppDataHandle {
-    pub fn new(
-        state: std::sync::Arc<tokio::sync::RwLock<AppState>>,
-        stdin_tx: mpsc::UnboundedSender<String>,
-        stdout_rx: broadcast::Receiver<String>,
-        event_rx: broadcast::Receiver<AppEvent>,
-        event_tx: broadcast::Sender<AppEvent>,
-    ) -> Self {
-        Self {
-            state,
-            channels: AppChannels {
-                stdin_tx,
-                stdout_rx,
-                event_tx,
-                event_rx,
-            },
-        }
-    }
-
-    pub fn try_read_mem(&self, addr: u64, len: u64) {
-        self.channels
-            .event_tx
-            .send(AppEvent::ReadMemory(addr, len))
-            .unwrap();
-    }
-}
-
-pub struct App {
+#[derive(Debug, Clone)]
+pub struct TxChannels {
     pub stdin_tx: mpsc::UnboundedSender<String>,
     pub stdout_tx: broadcast::Sender<String>,
-    pub state: std::sync::Arc<tokio::sync::RwLock<AppState>>,
     pub event_tx: broadcast::Sender<AppEvent>,
 }
 
-impl App {
+impl TxChannels {
+    /// The stdin rx channel is exclusevly owned, this is why it's returned directly on the return value
     pub fn new(cli: &CliArgs) -> (Self, mpsc::UnboundedReceiver<String>) {
         let (gdb_stdin_tx, gdb_stdin_rx) = tokio::sync::mpsc::unbounded_channel();
         let (gdb_mi_tx, _) = tokio::sync::broadcast::channel(64);
         let (event_tx, _) = tokio::sync::broadcast::channel(64);
-        let state = std::sync::Arc::new(tokio::sync::RwLock::new(AppState {
-            gdb_ctx: GdbLifterContext::new(),
-            cli_args: cli.clone(),
-        }));
 
         (
             Self {
                 stdin_tx: gdb_stdin_tx,
                 stdout_tx: gdb_mi_tx,
                 event_tx,
-                state,
             },
             gdb_stdin_rx,
         )
     }
 
-    pub fn data_handle(&self) -> AppDataHandle {
-        AppDataHandle::new(
-            self.state.clone(),
-            self.stdin_tx.clone(),
-            self.stdout_tx.subscribe(),
-            self.event_tx.subscribe(),
-            self.event_tx.clone(),
-        )
+    pub fn subscribe(&self) -> RxChannels {
+        RxChannels {
+            stdout_rx: self.stdout_tx.subscribe(),
+            event_rx: self.event_tx.subscribe(),
+        }
     }
 }

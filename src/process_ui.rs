@@ -1,5 +1,5 @@
-use crate::AppDataHandle;
 use crate::AppEvent;
+use crate::TxChannels;
 use crate::il::{DebuggerEvent, Disassembly, ExecutionState, MemMap, StackFrame};
 use proc_maps::get_process_maps;
 use read_process_memory::CopyAddress;
@@ -38,11 +38,11 @@ impl ProcessState {
         }
     }
 
-    pub fn tick(&mut self, app: &AppDataHandle) {
+    pub fn tick(&mut self, channels: &TxChannels) {
         self.lazy_update_cs_disassembly();
     }
 
-    pub fn update(&mut self, event: &AppEvent, app: &AppDataHandle) {
+    pub fn update(&mut self, event: &AppEvent, channels: &TxChannels) {
         self.update_memory_maps(event);
         self.update_registers(event);
         self.update_callstack(event);
@@ -51,7 +51,7 @@ impl ProcessState {
         self.update_cwd(event);
         self.events_history.push(event.clone());
 
-        self.ask_update_mem(event, app);
+        self.ask_update_mem(event, channels);
     }
 
     pub fn update_pid(&mut self, event: &AppEvent) {
@@ -98,12 +98,12 @@ impl ProcessState {
         }
     }
 
-    pub fn ask_update_mem(&self, event: &AppEvent, app: &AppDataHandle) {
+    pub fn ask_update_mem(&self, event: &AppEvent, channels: &TxChannels) {
         match event {
             AppEvent::IL(_) => {
                 for (reg_name, maybe_addr) in self.registers.iter() {
                     if let Some(_map) = self.addr_memory_map(*maybe_addr) {
-                        app.try_read_mem(*maybe_addr, 8);
+                        // channels.try_read_mem(*maybe_addr, 8);
                     }
                 }
             }

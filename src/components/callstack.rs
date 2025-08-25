@@ -53,14 +53,9 @@ impl crate::tui::Component for CallStack {
     fn handle_terminal_event(
         &mut self,
         event: &crossterm::event::Event,
-        app_data_handle: &crate::AppDataHandle,
+        app_data_handle: &crate::TxChannels,
     ) {
     }
-    fn handle_app_event(
-        &mut self,
-        event: &crate::AppEvent,
-        app_data_handle: &crate::AppDataHandle,
-    ) {
-    }
+    fn handle_app_event(&mut self, event: &crate::AppEvent, app_data_handle: &crate::TxChannels) {}
     fn handle_ui_event(&mut self, event: &crate::tui::UiEvent) {}
 }

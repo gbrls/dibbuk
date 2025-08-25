@@ -1,4 +1,9 @@
+use std::error::Error;
+
 // Maybe seperate IL types into input (user generated) and output (gdb, capstone, ...) generated?
+pub trait ILLifter<E: Error> {
+    fn parse(&mut self, s: &str) -> Result<DebuggerEvent, E>;
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ExecutionState {
@@ -72,6 +77,7 @@ pub enum DebuggerEvent {
     Disassembly(Vec<Disassembly>),
     StackFrames(Vec<StackFrame>),
     Cwd(String),
+    Tick,
 }
 
 #[derive(Clone, Debug, PartialEq)]
