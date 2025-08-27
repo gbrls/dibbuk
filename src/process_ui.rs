@@ -197,27 +197,26 @@ impl ProcessState {
 
     fn update_memory_maps(&mut self, event: &AppEvent) {
         match event {
-            AppEvent::IL(DebuggerEvent::Maps(mps)) => {
-                mps.iter()
-                    .filter(|mp| mp.map_range.filename().is_some())
-                    .for_each(|m| {
-                        let f = m.map_range.filename().unwrap();
-                        let path_str = f.as_os_str().to_str().unwrap();
-                        if !self.elfs.contains_key(path_str) {
-                            match crate::elf::Elf::new(path_str) {
-                                Ok(elf) => {
-                                    self.elfs.insert(path_str.to_string(), elf);
-                                }
-                                Err(e) => {
-                                    //println!("{} {:?}", path_str, e);
-                                }
-                            }
-                        }
-                    });
+            // AppEvent::IL(DebuggerEvent::Maps(mps)) => {
+            //     mps.iter()
+            //         .filter(|mp| mp.map_range.filename().is_some())
+            //         .for_each(|m| {
+            //             let f = m.map_range.filename().unwrap();
+            //             let path_str = f.as_os_str().to_str().unwrap();
+            //             if !self.elfs.contains_key(path_str) {
+            //                 match crate::elf::Elf::new(path_str) {
+            //                     Ok(elf) => {
+            //                         self.elfs.insert(path_str.to_string(), elf);
+            //                     }
+            //                     Err(e) => {
+            //                         //println!("{} {:?}", path_str, e);
+            //                     }
+            //                 }
+            //             }
+            //         });
 
-                self.memory_maps = Some(mps.clone());
-            }
-
+            //     self.memory_maps = Some(mps.clone());
+            // }
             _ => {}
         }
     }

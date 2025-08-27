@@ -1,11 +1,14 @@
 use std::error::Error;
 
+use facet::Facet;
+
 // Maybe seperate IL types into input (user generated) and output (gdb, capstone, ...) generated?
 pub trait ILLifter<E: Error> {
     fn parse(&mut self, s: &str) -> Result<DebuggerEvent, E>;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Facet)]
+#[repr(u8)]
 pub enum ExecutionState {
     Unknown,
     Running,
@@ -19,13 +22,14 @@ impl Default for ExecutionState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Facet)]
+#[repr(u8)]
 pub enum DisassemblyEngine {
     GDB,
     CS,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Facet)]
 pub struct Disassembly {
     pub source: DisassemblyEngine,
     pub str: String,
@@ -58,7 +62,7 @@ impl PartialOrd for MemMap {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Eq)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Facet)]
 pub struct StackFrame {
     pub depth: u64,
     pub addr: u64,
@@ -67,10 +71,12 @@ pub struct StackFrame {
     pub line: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Eq)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Facet)]
+#[repr(u8)]
 pub enum DebuggerEvent {
     Pid(u64),
-    Maps(Vec<MemMap>),
+    // TODO: TEMPORARY as the MemMap struct needs to be refactored
+    // Maps(Vec<MemMap>),
     RegisterValue(Vec<(String, u64)>),
     UpdatedRegisters(Vec<String>),
     StateUpdate(ExecutionState),
@@ -80,7 +86,8 @@ pub enum DebuggerEvent {
     Tick,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Facet)]
+#[repr(u8)]
 pub enum DebuggerCommand {
     AddBreakpoint(String),
     Raw(String),

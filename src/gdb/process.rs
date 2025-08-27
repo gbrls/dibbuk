@@ -1,4 +1,5 @@
 use crate::gdb::mi;
+use facet::Facet;
 use std::io::Write;
 use std::process::Stdio;
 use thiserror::Error;
@@ -10,6 +11,7 @@ use tokio::{
     process::Command,
 };
 
+#[derive(Debug, Clone, Facet)]
 pub struct Builder {
     executable_path: String,
     args: Vec<String>,

@@ -3,7 +3,7 @@ use dibbuk::{
         State,
         test::{self, Recording, RecordingBuilder},
     },
-    gdb::{self, mi::MiRecord, process::GdbHandle},
+    gdb::{self, Builder, mi::MiRecord, process::GdbHandle},
     il::{DebuggerCommand, DebuggerEvent},
 };
 use tokio::{
@@ -16,15 +16,15 @@ use facet_pretty::FacetPretty;
 
 struct TestApp {
     debugger_state: State,
-    stdout: broadcast::Receiver<String>,
+    gdb: broadcast::Receiver<String>,
     stdin_reader_handle: JoinHandle<()>,
-    stdin_rx: broadcast::Receiver<String>,
+    user: broadcast::Receiver<String>,
     recording: Recording,
     running: bool,
 }
 
 impl TestApp {
-    pub fn new(gdb_handle: &GdbHandle) -> Self {
+    pub fn new(gdb_builder: Builder) -> Self {
         let mut stdin_reader = BufReader::new(tokio::io::stdin());
         let (stdin_tx, stdin_rx) = broadcast::channel(16);
         let stdin_fut = tokio::spawn(async move {
@@ -38,21 +38,25 @@ impl TestApp {
                     Ok(_) => {
                         stdin_tx.send(line_buf.clone()).unwrap();
                     }
-                    Err(e) => {
+                    Err(_) => {
                         break;
                     }
                 }
             }
         });
 
+        let (gdb, recording) = RecordingBuilder::new()
+            .path("validation/recording-simple.json")
+            .overwrite(true)
+            .build(gdb_builder)
+            .unwrap();
+
         TestApp {
-            recording: RecordingBuilder::new()
-                .path("validation/recording-simple.json")
-                .build(),
-            debugger_state: State::new(gdb_handle.stdin_tx.clone()),
-            stdout: gdb_handle.subscribe_stdout(),
+            recording: recording,
+            debugger_state: State::new(gdb.stdin_tx.clone()),
+            gdb: gdb.subscribe_stdout(),
             stdin_reader_handle: stdin_fut,
-            stdin_rx: stdin_rx,
+            user: stdin_rx,
             running: false,
         }
     }
@@ -72,13 +76,18 @@ impl TestApp {
         print!("> {line}");
         let mi = gdb::mi::parse(line).unwrap();
         println!("{}", mi.pretty());
+        let mi_rec_id = self.recording.push_gdb_output(line.to_string(), mi.clone());
+
+        let evt = self.debugger_state.lift(mi.clone()).unwrap();
+        println!("{}", evt.pretty());
+
+        self.recording.push_dibbuk_event(mi_rec_id, evt);
 
         if let MiRecord::LogStream(s) = &mi {
             if s == "quit\n" {
                 self.stop();
             }
         }
-        self.recording.push_gdb_output(line.to_string(), mi);
     }
 
     fn handle_user_input(&mut self, line: &str) {
@@ -93,8 +102,8 @@ impl TestApp {
 
     async fn recv_events(&mut self) {
         tokio::select! {
-            line = self.stdout.recv() => { if let Ok(line) = line { self.handle_gdb_output(line.as_str()); } }
-            line = self.stdin_rx.recv() => { if let Ok(line) = line { self.handle_user_input(line.as_str()); } }
+            line = self.gdb.recv() => { if let Ok(line) = line { self.handle_gdb_output(line.as_str()); } }
+            line = self.user.recv() => { if let Ok(line) = line { self.handle_user_input(line.as_str()); } }
             _ = tokio::time::sleep(tokio::time::Duration::from_millis(10)) => { self.debugger_state.update(&DebuggerEvent::Tick); }
         }
     }
@@ -104,8 +113,9 @@ impl TestApp {
 async fn main() {
     println!("hello!");
 
-    let gdb_handle = gdb::Builder::new().spawn().unwrap();
-    let app = TestApp::new(&gdb_handle);
+    let gdb_builder = gdb::Builder::new().push_arg("./resources/drywall");
+    let app = TestApp::new(gdb_builder);
     app.run().await;
     println!("bye!");
+    // FIXME: THIS DOES NOT EXIT AFTER THE BYE
 }

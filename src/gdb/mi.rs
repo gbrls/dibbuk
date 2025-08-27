@@ -324,6 +324,15 @@ fn parse_list(input: &str) -> IResult<&str, Vec<MiValue>> {
 mod tests {
     use super::*;
 
+    fn validate_parsing_against_recording(path: &str) {
+        use crate::debugger::test::*;
+        let rec = RecordingBuilder::new().path(path).load().unwrap();
+
+        for (x, y) in rec.into_mi_test_cases() {
+            assert_eq!(parse(x.as_str()).unwrap(), y);
+        }
+    }
+
     #[test]
     fn test_stack_frames() {
         let input = "^done,stack=[frame={level=\"0\",addr=\"0x00007ffff7a3c250\",func=\"__GI__IO_setvbuf\",file=\"iosetvbuf.c\",fullname=\"/usr/src/debug/glibc-2.40-23.fc41.x86_64/libio/iosetvbuf.c\",line=\"35\",arch=\"i386:x86-64\"},frame={level=\"1\",addr=\"0x00005555555551cc\",func=\"main\",arch=\"i386:x86-64\"}]";
@@ -345,5 +354,10 @@ mod tests {
         } else {
             panic!("Not a result record");
         }
+    }
+
+    #[test]
+    fn small_recording() {
+        validate_parsing_against_recording("./validation/mi-small.json");
     }
 }
