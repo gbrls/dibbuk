@@ -1,10 +1,8 @@
 use crate::AppEvent;
 use crate::TxChannels;
 use crate::il::{DebuggerEvent, Disassembly, ExecutionState, MemMap, StackFrame};
-use proc_maps::get_process_maps;
-use read_process_memory::CopyAddress;
 use std::collections::HashMap;
-use std::path::{self, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Debug)]
 pub struct ProcessState {
@@ -166,7 +164,7 @@ impl ProcessState {
     fn capstone_update_read_all_execmem(&mut self) {
         if let (Some(pid), Some(maps)) = (self.child_pid, &self.memory_maps) {
             self.cs_disassembly
-                .extend((crate::capstone_disassembly::get_all_disassembly(maps, pid)));
+                .extend(crate::capstone_disassembly::get_all_disassembly(maps, pid));
         }
     }
 

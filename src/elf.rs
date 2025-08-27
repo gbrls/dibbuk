@@ -1,9 +1,6 @@
-use clap::builder::Str;
 use elf;
 use elf::endian;
 use std::collections::HashMap;
-use std::env;
-use std::fs;
 use std::path::Path;
 use std::rc::Rc;
 use thiserror::Error;
@@ -117,7 +114,7 @@ impl Elf {
 }
 
 mod test {
-    use super::Elf;
+    use crate::elf::Elf;
 
     //#[test]
     //fn elf_ropemporium_pivot() {

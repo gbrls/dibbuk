@@ -1,18 +1,13 @@
-// src/main.rs (or relevant module)
-
-use crate::gdb::parser;
-use crate::il::DebuggerCommand;
-use std::io::Write; // For flushing standard streams
+use crate::gdb::mi;
+use std::io::Write;
 use std::process::Stdio;
 use thiserror::Error;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::UnboundedReceiver;
-use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader, stdin},
-    process::{Child, ChildStderr, ChildStdin, ChildStdout, Command},
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    process::Command,
 };
 
 pub struct Builder {
@@ -206,7 +201,7 @@ pub enum OutputKind {
 
 #[derive(Clone, Debug)]
 pub struct MiOutput {
-    pub mi: Option<parser::MiRecord>,
+    pub mi: Option<mi::MiRecord>,
     pub string: OutputKind,
 }
 
@@ -224,9 +219,6 @@ mod tests {
     async fn gdb_process_stdout() {
         let gdb_handle = Builder::new().spawn().unwrap();
         let mut stdout_reader = gdb_handle.subscribe_stdout();
-
-        // stdout_task(stdout_reader);
-
         let stdout_handle = tokio::spawn(async move {
             loop {
                 match stdout_reader.recv().await {

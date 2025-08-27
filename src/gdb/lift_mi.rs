@@ -1,6 +1,5 @@
-use crate::gdb::parser::{MiRecord, ResultRecord};
+use crate::gdb::mi::{MiRecord, ResultRecord};
 use crate::il;
-use crate::process::MiOutput;
 use std::collections::HashMap;
 
 //TODO: refactor with generics to handle other architectures
@@ -33,7 +32,7 @@ impl GdbLifterContext {
 
     pub fn lift_asm_insns(result: &ResultRecord) -> Result<il::DebuggerEvent, LiftError> {
         // [mi] Result(ResultRecord { token: None, class: "done", results: {"asm_insns": List([Tuple([("address", Const("0x00005555555555d5")), ("func-name", Const("main")), ("offset", Const("5")), ("inst", Const("push   %r13"))])
-        use super::parser::*;
+        use super::mi::*;
         use il::*;
         if let MiValue::List(asm_tuples) = result.results.get("asm_insns").unwrap() {
             let mut asm_lines = Vec::new();
@@ -85,7 +84,7 @@ impl GdbLifterContext {
         }
     }
     pub fn lift_threads(result: &ResultRecord) -> Result<il::DebuggerEvent, LiftError> {
-        use super::parser::*;
+        use super::mi::*;
         use il::*;
         if let MiValue::List(tuple_list) = result.results.get("threads").unwrap() {
             for tpl in tuple_list {
@@ -115,7 +114,7 @@ impl GdbLifterContext {
     }
 
     pub fn lift_stack(result: &ResultRecord) -> Result<il::DebuggerEvent, LiftError> {
-        use super::parser::*;
+        use super::mi::*;
         use il::*;
         if let MiValue::List(tuple_list) = result.results.get("stack").unwrap() {
             let mut frames = Vec::new();
@@ -180,7 +179,7 @@ impl GdbLifterContext {
         }
     }
     pub fn update_register_names(&mut self, result: &ResultRecord) -> Result<(), LiftError> {
-        use super::parser::*;
+        use super::mi::*;
         if let MiValue::List(regs) = result.results.get("register-names").unwrap() {
             for (i, r) in regs.iter().enumerate() {
                 if let MiValue::Const(s) = r {
@@ -196,7 +195,7 @@ impl GdbLifterContext {
         &self,
         result: &ResultRecord,
     ) -> Result<il::DebuggerEvent, LiftError> {
-        use super::parser::*;
+        use super::mi::*;
         use il::*;
 
         // Result(ResultRecord { token: None, class: "done", results: {"changed-registers": List([Const("0"), Const("1"), Const("2"), Const("3"),
@@ -239,7 +238,7 @@ impl GdbLifterContext {
         &self,
         result: &ResultRecord,
     ) -> Result<il::DebuggerEvent, LiftError> {
-        use super::parser::*;
+        use super::mi::*;
         use il::*;
 
         if let MiValue::List(tuple_list) = result.results.get("register-values").unwrap() {
@@ -285,7 +284,7 @@ impl GdbLifterContext {
     }
 
     pub fn lift(&mut self, value: MiRecord) -> Result<il::DebuggerEvent, LiftError> {
-        use super::parser::*;
+        use super::mi::*;
         use il::*;
 
         match &value {
@@ -382,9 +381,10 @@ impl GdbLifterContext {
                 Ok(base)
             }
             GetRegisterUpdates => Ok("-data-list-changed-registers".into()),
-            GetDisassemblyRel(start, end) => {
-                Ok({ format!("-data-disassemble -s \"$pc-{}\" -e \"$pc+{}\"", start, end) })
-            }
+            GetDisassemblyRel(start, end) => Ok(format!(
+                "-data-disassemble -s \"$pc-{}\" -e \"$pc+{}\"",
+                start, end
+            )),
             Quit => Ok("exit".into()),
             Raw(s) => Ok(s.clone()),
         }
@@ -397,7 +397,7 @@ mod tests {
 
     #[test]
     fn lift_gdb_exec_async() {
-        use crate::gdb::parser::*;
+        use crate::gdb::mi::*;
         use MiRecord::*;
 
         let mut lifter = GdbLifterContext::new();

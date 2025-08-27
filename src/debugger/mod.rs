@@ -1,23 +1,21 @@
 use anyhow::Result;
-use futures::{FutureExt, StreamExt};
-use std::ops::AddAssign;
 use tokio::sync::mpsc;
+
+pub mod test;
 
 use crate::{
     IOTask,
     gdb::{
         self,
         lift_mi::{GdbLifterContext, LiftError},
+        mi::MiRecord,
     },
     il::{self, DebuggerCommand, DebuggerEvent},
 };
-use color_eyre::owo_colors::OwoColorize;
-use log::{info, warn};
 
 #[derive(Debug, Clone)]
 struct CommandTransaction {
     pub command: DebuggerCommand,
-    pub finished: Box<fn(&DebuggerEvent) -> bool>,
     pub started: Option<std::time::Instant>,
 }
 
@@ -27,7 +25,7 @@ pub struct SessionHandle {}
 struct Session {}
 
 impl Session {
-    pub fn spawn<B: IOTask>(mut backend: B) -> SessionHandle {
+    pub fn spawn<B: IOTask>(backend: B) -> SessionHandle {
         let (stdin_tx, stdin_rx) = tokio::sync::mpsc::unbounded_channel();
         let (stdout_tx, _) = tokio::sync::broadcast::channel(64);
         let io = backend.start(stdin_rx, stdout_tx);
@@ -39,7 +37,7 @@ impl Session {
 /// This struct is used to coordinate IO to the debugger process. If you're
 /// using async code, it's best to use the `Session` and `SessionHandle` instead.
 #[derive(Debug)]
-struct State {
+pub struct State {
     tx: mpsc::UnboundedSender<String>,
     commands_queue: std::collections::VecDeque<CommandTransaction>,
     completed_transactions: Vec<(std::time::Instant, CommandTransaction)>,
@@ -60,40 +58,30 @@ impl State {
         }
     }
 
-    pub fn send_command(&mut self, command: &crate::il::DebuggerCommand) {
+    pub fn send(&mut self, command: &crate::il::DebuggerCommand) {
         let str = self.lifter.lower(&command).unwrap();
         self.tx.send(str).unwrap();
     }
 
-    pub fn queue_command(
-        &mut self,
-        command: &crate::il::DebuggerCommand,
-        update: fn(&DebuggerEvent) -> bool,
-    ) {
+    pub fn queue(&mut self, command: &DebuggerCommand) {
         if self.commands_queue.is_empty() {
-            self.send_command(&command);
+            self.send(&command);
         }
         self.commands_queue.push_back(CommandTransaction {
             command: command.clone(),
-            finished: Box::new(update),
             started: Some(std::time::Instant::now()),
         });
     }
 
-    fn push_front_command(
-        &mut self,
-        command: &crate::il::DebuggerCommand,
-        update: fn(&DebuggerEvent) -> bool,
-    ) {
-        self.send_command(&command);
+    fn push_front(&mut self, command: &crate::il::DebuggerCommand) {
+        self.send(&command);
         self.commands_queue.push_front(CommandTransaction {
             command: command.clone(),
-            finished: Box::new(update),
             started: Some(std::time::Instant::now()),
         });
     }
 
-    pub fn pop_command_queue(&mut self) {
+    pub fn update_queue(&mut self) {
         let transaction = self.commands_queue.front().unwrap();
         let now = std::time::Instant::now();
 
@@ -108,29 +96,24 @@ impl State {
 
         if !self.commands_queue.is_empty() {
             let next_transaction = self.commands_queue.front().unwrap().clone();
-            self.send_command(&next_transaction.command);
+            self.send(&next_transaction.command);
         }
     }
-    fn update(&mut self, evt: &il::DebuggerEvent) {
+    pub fn update(&mut self, evt: &il::DebuggerEvent) {
         self.debugger_events_history.push(evt.clone());
 
         if self.commands_queue.front().is_some() {
             let transaction = self.commands_queue.front().unwrap();
-            if (transaction.finished)(evt) {
-                self.pop_command_queue();
+            match transaction.command.generated(evt) {
+                Some(true) | None => {
+                    self.update_queue();
+                }
+                _ => {}
             }
         }
     }
 
-    fn parse(&mut self, line: &str) -> Result<DebuggerEvent, LiftError> {
-        let mi = gdb::parser::parse_mi_line(line);
-        let mi = match mi {
-            Err(_) => return Err(LiftError::InvalidMI),
-            Ok((_unparsed, rec)) => {
-                println!("MI: {:?}", &rec);
-                rec
-            }
-        };
+    pub fn lift(&mut self, mi: MiRecord) -> Result<DebuggerEvent, LiftError> {
         self.lifter.lift(mi)
     }
 }
@@ -139,7 +122,7 @@ impl State {
 mod tests {
     use tokio::sync::broadcast;
 
-    use crate::{IOTask, RxChannels};
+    use crate::{IOTask, RxChannels, gdb::process::GdbHandle};
 
     use super::*;
 
@@ -149,7 +132,7 @@ mod tests {
     ) {
         loop {
             while let Ok(line) = stdout.recv().await {
-                if let Ok(evt) = state.parse(line.as_str()) {
+                if let Ok(evt) = state.lift(gdb::mi::parse(line.as_str()).unwrap()) {
                     println!("EVENT: {:?} -> {:?}", &line, &evt);
                     state.update(&evt);
                 }
@@ -172,20 +155,11 @@ mod tests {
 
         let mut state = State::new(gdb_handle.stdin_tx.clone());
 
-        state.queue_command(&il::DebuggerCommand::StartI, |e| match e {
-            DebuggerEvent::StateUpdate(il::ExecutionState::Stopped) => true,
-            _ => false,
-        });
-        state.queue_command(&il::DebuggerCommand::GetRegisterNames, |_| true);
-        state.queue_command(&il::DebuggerCommand::ThreadInfo, |e| match e {
-            DebuggerEvent::Pid(_) => true,
-            _ => false,
-        });
-
-        state.queue_command(&il::DebuggerCommand::GetAllRegisterValues, |e| match e {
-            DebuggerEvent::RegisterValue(_) => true,
-            _ => false,
-        });
+        use il::DebuggerCommand::*;
+        state.queue(&StartI);
+        state.queue(&GetRegisterNames);
+        state.queue(&ThreadInfo);
+        state.queue(&GetAllRegisterValues);
 
         let event_loop_handle = tokio::spawn(state_recv_n_events::<4>(
             gdb_handle.subscribe_stdout(),
@@ -210,27 +184,14 @@ mod tests {
 
         let mut state = State::new(gdb_handle.stdin_tx.clone());
 
-        state.queue_command(
-            &il::DebuggerCommand::Raw(
-                "file /home/gbrls/ctf/2025/dice/r2uwu2s-resort/resort".into(),
-            ),
-            |_| true,
-        );
+        state.queue(&il::DebuggerCommand::Raw(
+            "file /home/gbrls/ctf/2025/dice/r2uwu2s-resort/resort".into(),
+        ));
 
-        state.queue_command(&il::DebuggerCommand::StartI, |e| match e {
-            DebuggerEvent::StateUpdate(il::ExecutionState::Stopped) => true,
-            _ => false,
-        });
-        state.queue_command(&il::DebuggerCommand::GetRegisterNames, |_| true);
-        state.queue_command(&il::DebuggerCommand::ThreadInfo, |e| match e {
-            DebuggerEvent::Pid(_) => true,
-            _ => false,
-        });
-
-        state.queue_command(&il::DebuggerCommand::GetAllRegisterValues, |e| match e {
-            DebuggerEvent::RegisterValue(_) => true,
-            _ => false,
-        });
+        state.queue(&il::DebuggerCommand::StartI);
+        state.queue(&il::DebuggerCommand::GetRegisterNames);
+        state.queue(&il::DebuggerCommand::ThreadInfo);
+        state.queue(&il::DebuggerCommand::GetAllRegisterValues);
 
         let event_loop_handle = tokio::spawn(state_recv_n_events::<4>(
             gdb_handle.subscribe_stdout(),
@@ -250,50 +211,60 @@ mod tests {
     }
 
     struct TestApp {
-        debugger_context: Session,
-        rx: RxChannels,
+        debugger_state: State,
+        stdout: broadcast::Receiver<String>,
         running: bool,
     }
 
     impl TestApp {
-        pub fn new(debugger: Session, rx: RxChannels) -> Self {
+        pub fn new(gdb_handle: &GdbHandle) -> Self {
             TestApp {
-                debugger_context: debugger,
+                debugger_state: State::new(gdb_handle.stdin_tx.clone()),
+                stdout: gdb_handle.subscribe_stdout(),
                 running: false,
-                rx: rx,
             }
         }
 
         pub async fn run(mut self) {
             self.running = true;
+            self.debugger_state
+                .queue(&DebuggerCommand::Raw("help".into()));
+            self.debugger_state
+                .queue(&DebuggerCommand::Raw("asd;flkajsdf".into()));
+
             while self.running {
-                // self.handle_stdout_event().await;
+                if self.handle_stdout_event().await {
+                    break;
+                }
             }
         }
 
-        // TODO: update session handle
-        // async fn handle_stdout_event(&mut self) {
-        //     tokio::select! {
-        //         line = self.rx.stdout_rx.recv().fuse() => {
-        //             if let Ok(line) = line &&
-        //             let Ok(evt) = self.debugger_context.parse(line.as_str()) {
-        //                 println!("EVENT: {:?} -> {:?}", &line, &evt);
-        //                 self.debugger_context.update(&evt);
-        //             }
-        //         }
-        //         _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
-        //                 self.debugger_context.update(&DebuggerEvent::Tick);
-        //         }
-        //     }
-        // }
+        async fn handle_stdout_event(&mut self) -> bool {
+            tokio::select! {
+                line = self.stdout.recv() => {
+                    if let Ok(line) = line &&
+                    let Ok(evt) = self.debugger_state.lift(gdb::mi::parse(line.as_str()).unwrap()) {
+                        println!("EVENT: {:?} -> {:?}", &line, &evt);
+                        self.debugger_state.update(&evt);
+                        true
+                    } else {
+
+                        false
+                    }
+                }
+                _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
+                        self.debugger_state.update(&DebuggerEvent::Tick);
+                        false
+                }
+            }
+        }
     }
 
     #[tokio::test]
     async fn app_with_debugger() {
-        let session = Session::spawn(gdb::Builder::new());
-
-        // let app = TestApp::new(session, tx.subscribe());
-        // app.run().await;
+        let gdb_handle = gdb::Builder::new().spawn().unwrap();
+        let app = TestApp::new(&gdb_handle);
+        app.run().await;
         // let app = TestApp::new();
     }
 }

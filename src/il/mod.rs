@@ -100,3 +100,22 @@ pub enum DebuggerCommand {
     GetDisassemblyRel(u64, u64),
     Quit,
 }
+
+impl DebuggerCommand {
+    pub fn generated(&self, evt: &DebuggerEvent) -> Option<bool> {
+        use DebuggerCommand::*;
+        use DebuggerEvent::*;
+        match (self, evt) {
+            (GetAllRegisterValues, RegisterValue(_)) => Some(true),
+            (GetAllRegisterValues, _) => Some(false),
+
+            (ThreadInfo, Pid(_)) => Some(true),
+            (ThreadInfo, _) => Some(false),
+
+            (StartI, StateUpdate(ExecutionState::Stopped)) => Some(true),
+            (StartI, _) => Some(false),
+
+            (_, _) => None,
+        }
+    }
+}

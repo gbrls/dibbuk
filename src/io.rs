@@ -62,17 +62,36 @@ impl Builder {
             .stderr(Stdio::piped());
 
         #[cfg(unix)]
-        if self.start_frozen {
-            unsafe {
-                cmd.pre_exec(|| {
-                    libc::kill(libc::getpid(), libc::SIGSTOP);
-                    Ok(())
-                });
-            }
+        {
+            cmd.process_group(0);
         }
+
+        // #[cfg(unix)]
+        // if self.start_frozen {
+        //     unsafe {
+        //         cmd.pre_exec(|| {
+        //             let rc = libc::kill(libc::getpid(), libc::SIGSTOP);
+        //             if rc != 0 {
+        //                 libc::_exit(127);
+        //             }
+        //             Ok(())
+        //         });
+        //     }
+        // }
 
         let mut child = cmd.spawn().map_err(IoSpawnError::Spawn)?;
         let pid = child.id().unwrap_or(0);
+        println!("spawned process {} as PID {}", self.executable_path, pid);
+
+        // this is a small race condition
+        #[cfg(unix)]
+        if self.start_frozen {
+            unsafe {
+                if libc::kill(pid as i32, libc::SIGSTOP) == -1 {
+                    libc::_exit(127);
+                }
+            }
+        }
 
         let stdin = child.stdin.take().ok_or(IoSpawnError::MissingStdin)?;
         let stdout = child.stdout.take().ok_or(IoSpawnError::MissingStdout)?;
@@ -348,6 +367,8 @@ mod tests {
             .spawn()
             .expect("spawn");
 
+        println!("started process as PID {}", io.pid());
+
         let mut out = io.stdout();
 
         let got = timeout(Duration::from_secs(1), out.recvuntil(b"123", true))
@@ -376,6 +397,8 @@ mod tests {
         let mut io = Builder::new().exe("/bin/cat").spawn().expect("spawn");
         let mut out = io.stdout();
 
+        println!("started process as PID {}", io.pid());
+
         io.send_raw(&[0x00, 0xFF, 0x41]).await.expect("send");
         let data = timeout(Duration::from_millis(500), out.recv_exact(3))
             .await
@@ -398,9 +421,11 @@ mod tests {
             .spawn()
             .expect("spawn");
 
+        println!("started process as PID {}", io.pid());
+
         let mut out = io.stdout();
 
-        // Should not get data while SIGSTOP'ed
+        // // Should not get data while SIGSTOP'ed
         let res = timeout(Duration::from_millis(150), out.recv_some()).await;
         assert!(res.is_err(), "should not receive while frozen");
 

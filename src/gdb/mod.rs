@@ -3,7 +3,7 @@ use tokio::sync::{broadcast, mpsc};
 use crate::IOTask;
 
 pub mod lift_mi;
-pub mod parser;
+pub mod mi;
 pub mod process;
 
 pub use process::Builder;

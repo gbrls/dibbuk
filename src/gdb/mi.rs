@@ -1,22 +1,24 @@
+use facet::Facet;
 use nom::Parser;
-use nom::bytes::complete::take_while;
 
 use nom::{
-    Finish, IResult,
+    IResult,
     branch::alt,
-    bytes::complete::{escaped_transform, is_not, tag, take_while1},
-    character::complete::{char, digit1, multispace0, one_of},
+    bytes::complete::{escaped_transform, is_not, take_while1},
+    character::complete::{char, digit1},
     combinator::{cut, map, map_res, opt, recognize, value},
-    error::{ParseError, context},
+    error::context,
     multi::separated_list0,
-    sequence::{delimited, preceded, separated_pair, tuple},
+    sequence::{delimited, preceded, separated_pair},
 };
 
 use std::collections::HashMap;
 
-/// Represents a fully parsed GDB MI Record (Output Line).
-/// source: https://sourceware.org/gdb/current/onlinedocs/gdb.html/GDB_002fMI-Output-Syntax.html#GDB_002fMI-Output-Syntax
-#[derive(Debug, Clone, PartialEq, Eq)]
+// Represents a fully parsed GDB MI Record (Output Line).
+// source: https://sourceware.org/gdb/current/onlinedocs/gdb.html/GDB_002fMI-Output-Syntax.html#GDB_002fMI-Output-Syntax
+
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+#[repr(u8)]
 pub enum MiRecord {
     Result(ResultRecord),
     ExecAsync(AsyncRecord),
@@ -29,31 +31,31 @@ pub enum MiRecord {
     Unknown(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct ResultRecord {
     pub token: Option<u64>,
     pub class: String,
-    /// Key-value pairs. Using HashMap based on user's last version.
     pub results: HashMap<String, MiValue>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct AsyncRecord {
     pub token: Option<u64>,
     pub kind: AsyncKind,
     pub class: String,
-    /// Key-value pairs. Using HashMap based on user's last version.
     pub results: HashMap<String, MiValue>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Facet)]
+#[repr(u8)]
 pub enum AsyncKind {
     Exec,
     Status,
     Notify,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+#[repr(u8)]
 pub enum MiValue {
     /// A constant string (`"content"`). Content is unescaped.
     Const(String),
@@ -63,9 +65,21 @@ pub enum MiValue {
     List(Vec<MiValue>),
 }
 
+#[derive(Copy, Debug, Clone)]
+pub enum MiParseError {
+    Unknown,
+}
+
 /// Parses a single line of GDB MI output into an `MiRecord`.
 /// Assumes input does not contain the trailing newline.
-pub fn parse_mi_line(input: &str) -> IResult<&str, MiRecord> {
+pub fn parse(line: &str) -> Result<MiRecord, MiParseError> {
+    match parse_mi_line(line) {
+        Err(_) => Err(MiParseError::Unknown),
+        Ok((_, mi)) => Ok(mi),
+    }
+}
+
+fn parse_mi_line(input: &str) -> IResult<&str, MiRecord> {
     let input = input.trim();
     if input == "(gdb)" {
         return Ok(("", MiRecord::GdbPrompt));

@@ -5,23 +5,21 @@ pub mod elf;
 pub mod event_loop;
 pub mod gdb;
 pub mod il;
+pub mod io;
 pub mod process_ui;
 // pub mod theme;
 // pub mod tui;
 
-use futures::channel::mpsc::UnboundedReceiver;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 
-use clap::{Parser, Subcommand};
+use clap::Parser;
 use std::path::PathBuf;
 
 use clap::builder::Styles;
 use clap::builder::styling;
 
-use gdb::lift_mi::*;
-use gdb::parser;
-use gdb::process;
+use gdb::mi;
 
 pub trait IOTask {
     fn start(
@@ -63,7 +61,7 @@ impl CliArgs {
 pub enum AppEvent {
     IL(il::DebuggerEvent),
     Log(String),
-    GdbMi(parser::MiRecord),
+    GdbMi(mi::MiRecord),
     ReadMemory(u64, u64),
     Memory(u64, Vec<u8>),
     Any,
