@@ -28,3 +28,6 @@ libc = "0.2.175"
 facet = "0.28.1"
 facet-pretty = "0.28.0"
 facet-json = "0.28.2"
+steel-core = { git="https://github.com/mattwparas/steel.git", branch = "master" }
+steel-derive = "0.6.0"
+steel-repl = { git="https://github.com/mattwparas/steel.git", branch = "master" }

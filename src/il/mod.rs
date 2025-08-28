@@ -1,13 +1,14 @@
 use std::error::Error;
 
 use facet::Facet;
+use steel_derive::Steel;
 
 // Maybe seperate IL types into input (user generated) and output (gdb, capstone, ...) generated?
 pub trait ILLifter<E: Error> {
     fn parse(&mut self, s: &str) -> Result<DebuggerEvent, E>;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Facet)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Facet, Steel)]
 #[repr(u8)]
 pub enum ExecutionState {
     Unknown,
@@ -22,14 +23,14 @@ impl Default for ExecutionState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Facet)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Facet, Steel)]
 #[repr(u8)]
 pub enum DisassemblyEngine {
     GDB,
     CS,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Facet)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Facet, Steel)]
 pub struct Disassembly {
     pub source: DisassemblyEngine,
     pub str: String,
@@ -62,7 +63,7 @@ impl PartialOrd for MemMap {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Facet)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Facet, Steel)]
 pub struct StackFrame {
     pub depth: u64,
     pub addr: u64,
@@ -71,7 +72,7 @@ pub struct StackFrame {
     pub line: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Facet)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Facet, Steel)]
 #[repr(u8)]
 pub enum DebuggerEvent {
     Pid(u64),
@@ -86,7 +87,7 @@ pub enum DebuggerEvent {
     Tick,
 }
 
-#[derive(Clone, Debug, PartialEq, Facet)]
+#[derive(Clone, Debug, PartialEq, Facet, Steel)]
 #[repr(u8)]
 pub enum DebuggerCommand {
     AddBreakpoint(String),
@@ -109,7 +110,7 @@ pub enum DebuggerCommand {
 }
 
 impl DebuggerCommand {
-    pub fn generated(&self, evt: &DebuggerEvent) -> Option<bool> {
+    pub fn is_response(&self, evt: &DebuggerEvent) -> Option<bool> {
         use DebuggerCommand::*;
         use DebuggerEvent::*;
         match (self, evt) {

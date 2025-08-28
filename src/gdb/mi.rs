@@ -1,5 +1,9 @@
 use facet::Facet;
+use facet_json::{from_str, to_string};
 use nom::Parser;
+use steel::{SteelVal, rvals::SteelString};
+use steel_derive::Steel;
+use thiserror::Error;
 
 use nom::{
     IResult,
@@ -17,13 +21,15 @@ use std::collections::HashMap;
 // Represents a fully parsed GDB MI Record (Output Line).
 // source: https://sourceware.org/gdb/current/onlinedocs/gdb.html/GDB_002fMI-Output-Syntax.html#GDB_002fMI-Output-Syntax
 
-#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Steel)]
 #[repr(u8)]
 pub enum MiRecord {
     Result(ResultRecord),
+
     ExecAsync(AsyncRecord),
     StatusAsync(AsyncRecord),
     NotifyAsync(AsyncRecord),
+
     ConsoleStream(String),
     TargetStream(String),
     LogStream(String),
@@ -31,22 +37,29 @@ pub enum MiRecord {
     Unknown(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+impl Into<SteelVal> for MiRecord {
+    fn into(self) -> SteelVal {
+        SteelVal::StringV(self::to_string(&self).into())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Steel)]
 pub struct ResultRecord {
     pub token: Option<u64>,
     pub class: String,
     pub results: HashMap<String, MiValue>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Steel)]
 pub struct AsyncRecord {
     pub token: Option<u64>,
+    /// This only used internally by the parser to separate the enum variants, this shouldn't be used
     pub kind: AsyncKind,
     pub class: String,
     pub results: HashMap<String, MiValue>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Facet)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Facet, Steel)]
 #[repr(u8)]
 pub enum AsyncKind {
     Exec,
@@ -54,7 +67,7 @@ pub enum AsyncKind {
     Notify,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Steel)]
 #[repr(u8)]
 pub enum MiValue {
     /// A constant string (`"content"`). Content is unescaped.
@@ -65,8 +78,9 @@ pub enum MiValue {
     List(Vec<MiValue>),
 }
 
-#[derive(Copy, Debug, Clone)]
+#[derive(Copy, Debug, Clone, Error)]
 pub enum MiParseError {
+    #[error("Unknown error")]
     Unknown,
 }
 
