@@ -386,7 +386,7 @@ impl GdbLifterContext {
                 start, end
             )),
             Quit => Ok("exit".into()),
-            Raw(s) => Ok(s.clone()),
+            UserInput(s) => Ok(s.clone()),
         }
     }
 }

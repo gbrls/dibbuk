@@ -193,6 +193,10 @@ impl GdbHandle {
     pub fn subscribe_stdout(&self) -> broadcast::Receiver<String> {
         self.stdout_rx.resubscribe()
     }
+
+    pub fn send(&self, msg: String) -> Result<(), mpsc::error::SendError<String>> {
+        self.stdin_tx.send(msg)
+    }
 }
 
 #[derive(Clone, Debug)]

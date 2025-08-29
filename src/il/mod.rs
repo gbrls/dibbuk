@@ -1,4 +1,6 @@
+use facet_json::{from_str, to_string};
 use std::error::Error;
+use steel::SteelVal;
 
 use facet::Facet;
 use steel_derive::Steel;
@@ -91,7 +93,7 @@ pub enum DebuggerEvent {
 #[repr(u8)]
 pub enum DebuggerCommand {
     AddBreakpoint(String),
-    Raw(String),
+    UserInput(String),
     StepInstruction,
     StartI,
     NextInstruction,
@@ -125,5 +127,11 @@ impl DebuggerCommand {
 
             (_, _) => None,
         }
+    }
+}
+
+impl Into<SteelVal> for DebuggerCommand {
+    fn into(self) -> SteelVal {
+        SteelVal::StringV(self::to_string(&self).into())
     }
 }

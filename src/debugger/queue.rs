@@ -167,7 +167,7 @@ mod tests {
 
         let mut state = CommandQueue::new(gdb_handle.stdin_tx.clone());
 
-        state.queue(&il::DebuggerCommand::Raw(
+        state.queue(&il::DebuggerCommand::UserInput(
             "file /home/gbrls/ctf/2025/dice/r2uwu2s-resort/resort".into(),
         ));
 

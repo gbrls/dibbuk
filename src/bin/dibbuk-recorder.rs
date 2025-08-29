@@ -130,7 +130,7 @@ impl TestApp {
     fn handle_user_input(&mut self, line: &str) {
         let trimmed = line.trim_end().to_string();
         self.debugger_state
-            .queue(&DebuggerCommand::Raw(trimmed.clone()));
+            .queue(&DebuggerCommand::UserInput(trimmed.clone()));
         self.recording.push_user_input(line.to_string());
     }
 
