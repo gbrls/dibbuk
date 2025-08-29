@@ -87,34 +87,26 @@ impl AppState {
     }
 
     fn handle_stdin(&mut self, line: String) {
-        // println!("Received STDIN!!!! {}", line);
-
         let cmd = DebuggerCommand::UserInput(line.trim_end().to_string());
-
-        let _ = self
-            .runtime
-            .call_function_by_name_with_args(
-                "dibbuk/handle-event",
-                vec![SteelVal::Void, cmd.into()],
-            )
-            .unwrap();
-
+        self.event_callback(cmd.into());
         self.dispatch_gdb_commands();
     }
 
     fn handle_stdout(&mut self, line: String) {
         if let Ok(mi) = gdb::mi::parse(line.as_str()) {
-            self.runtime.run("(dibbuk/hello)").unwrap();
-
-            let _ = self
-                .runtime
-                .call_function_by_name_with_args(
-                    "dibbuk/handle-event",
-                    vec![SteelVal::Void, mi.into()],
-                )
-                .unwrap();
+            self.event_callback(mi.into());
             self.dispatch_gdb_commands();
         }
+    }
+
+    fn event_callback(&mut self, cmd: SteelVal) {
+        let state = self.runtime.extract_value("*dibbuk-state*").unwrap();
+        // println!("STATE: {:?}", &state);
+
+        let _ = self
+            .runtime
+            .call_function_by_name_with_args("dibbuk/handle-event", vec![state, cmd])
+            .unwrap();
     }
 
     fn dispatch_gdb_commands(&mut self) {
@@ -123,7 +115,6 @@ impl AppState {
             .extract::<SteelRequest>("*dibbuk-command*")
             .unwrap();
 
-        // println!("sending... {:?}", cmd);
         if let SteelRequest::GdbCommand(cmds) = cmd {
             for cmd in cmds {
                 if let SteelVal::StringV(s) = cmd {
