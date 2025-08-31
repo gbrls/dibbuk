@@ -31,3 +31,4 @@ facet-json = "0.28.2"
 steel-core = { git="https://github.com/mattwparas/steel.git", branch = "master" }
 steel-derive = "0.6.0"
 steel-repl = { git="https://github.com/mattwparas/steel.git", branch = "master" }
+notify = "8.2.0"

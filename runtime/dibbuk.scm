@@ -1,3 +1,4 @@
+;
 (define (dibbuk/cmd l) (GdbCommandsReq l))
 (define (dibbuk/none) (EmptyReq))
 (define (dibbuk/req? r) (Request? r))
@@ -16,15 +17,15 @@
 (define (eval-user-input str)
   (if (starts-with? str ":")
 
-    (->
-      str
-      (trim-start-matches ":")
-      (eval-string))
+    (displayln "=>" (->
+                     str
+                     (trim-start-matches ":")
+                     (eval-string)))
 
     (dibbuk/cmd (list str))))
 
 (define (handle-event state event)
-  (displayln event)
+  ; (displayln event)
   ; (displayln "")
   (let (
         (result
@@ -97,7 +98,7 @@
             ; default
             (#true #false))))
     ; (displayln "result:")
-    (displayln result)
+    ; (displayln result)
     ; (displayln "====\n")
     (cond
       ((dibbuk/req? result)
@@ -117,4 +118,4 @@
 ; data-list-changed-registers
 ; data-list-register-names
 ; data-list-register-values
-;
+;asdf
