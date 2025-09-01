@@ -4,10 +4,11 @@
 (define (dibbuk/reload) (Reload))
 (define (dibbuk/req? r) (Request? r))
 
-(define *a* 1337)
-
 (define *dibbuk-command* (dibbuk/none))
 (define *dibbuk-state* (hash))
+
+(define (state-insert k v)
+  (list (hash-insert *dibbuk-state* k v) (dibbuk/none)))
 
 (define (dibbuk/handle-event state evt-str)
   (let ((result (handle-event state (string->jsexpr evt-str))))
@@ -24,18 +25,12 @@
                         str
                         (trim-start-matches ":")
                         (eval-string))))
-      ;
-
       (displayln "=>" expr-result)
-      expr-result
-      ;
-      )
+      expr-result)
 
     (dibbuk/cmd (list str))))
 
 (define (handle-event state event)
-  ; (displayln event)
-  ; (displayln "")
   (let (
         (result
           (cond
@@ -80,6 +75,18 @@
                       ; pairs
                       ;
                       ))
+                  ((hash-contains? result 'changed-registers)
+                    (letrec ((ids
+                               (->
+                                 result
+                                 (hash-ref 'changed-registers)
+                                 (hash-ref 'List)
+                                 (transduce (mapping (lambda (mp) (hash-ref mp 'Const))) (into-list))
+                                 (string-join " ")))
+                             (cmd-str (string-append "-data-list-register-values " ids)))
+                      (begin
+                        (displayln cmd-str)
+                        (dibbuk/cmd (list cmd-str)))))
                   (#true result))))
 
             ((hash-contains? event 'NotifyAsync)
@@ -106,17 +113,25 @@
 
             ; default
             (#true #false))))
-    ; (displayln "result:")
-    ; (displayln result)
-    ; (displayln "====\n")
+
+    ; verbose debug prints
+    (if (and
+         (hash-contains? *dibbuk-state* 'verbose)
+         (hash-ref *dibbuk-state* 'verbose))
+      (begin (displayln "result:")
+        (displayln result)
+        (displayln "====\n")))
+
+    ; handle return logic, like understanding the format
+    ; this is kinda error prone, so it's probably best to write a struct here
     (cond
-      ((dibbuk/req? result)
-        (list state result))
       ((and
           (list? result)
           (hash? (first result))
           (dibbuk/req? (second result)))
         result)
+      ((dibbuk/req? result)
+        (list state result))
       (#true
         (list state (dibbuk/none))))))
 
