@@ -10,6 +10,7 @@ static DIBBUK_STATE: &'static str = "*dibbuk-state*";
 pub enum RuntimeRequest {
     Empty,
     GdbCommand(Vec<SteelVal>),
+    Reload,
 }
 
 pub struct Builder {
@@ -28,9 +29,14 @@ impl Builder {
 
         vm.register_type::<RuntimeRequest>("Request?");
         vm.register_fn("EmptyReq", || RuntimeRequest::Empty);
+        vm.register_fn("Reload", || RuntimeRequest::Reload);
         vm.register_fn("GdbCommandsReq", RuntimeRequest::GdbCommand);
 
         let dir: PathBuf = PathBuf::from(self.runtime_dir);
+
+        if !dir.exists() {
+            println!("DIR {dir:?} does not exist");
+        }
 
         let mut dibbuk_main_path = dir.clone();
         dibbuk_main_path.push("dibbuk.scm");
@@ -60,6 +66,7 @@ impl ScriptingRuntime {
         let program = std::fs::read_to_string(self.dibbuk_main_path.as_path());
         self.vm.run(program.unwrap()).unwrap();
         self.vm.register_value(DIBBUK_STATE, state);
+        // NOTE: Maybe use `update_value` instead like this
         // self.vm.update_value(DIBBUK_STATE, state).unwrap();
     }
 
@@ -70,9 +77,27 @@ impl ScriptingRuntime {
             .vm
             .call_function_by_name_with_args("dibbuk/handle-event", vec![state, cmd])
             .unwrap();
+
+        let cmd = self
+            .vm
+            .extract::<RuntimeRequest>("*dibbuk-command*")
+            .unwrap();
+
+        println!("command result: {:?}", cmd);
+
+        match cmd {
+            RuntimeRequest::Empty => {}
+            RuntimeRequest::GdbCommand(steel_vals) => {}
+            RuntimeRequest::Reload => {
+                let state = self.vm.extract_value("*dibbuk-state*").unwrap();
+                println!("realoading state...");
+                self.reload_main_with_state(state);
+                println!("state reloaded!");
+            }
+        }
     }
 
-    pub fn value_to_gdb_commands(&mut self) -> Vec<String> {
+    pub fn extract_gdb_commands(&mut self) -> Vec<String> {
         let cmd = self
             .vm
             .extract::<RuntimeRequest>("*dibbuk-command*")

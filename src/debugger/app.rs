@@ -96,7 +96,8 @@ impl App {
                     .parent()
                     .unwrap()
                     .parent()
-                    .unwrap(),
+                    .unwrap()
+                    .join("runtime"),
                 RecursiveMode::Recursive,
             )
             .unwrap();
@@ -120,6 +121,7 @@ impl App {
     }
 
     fn handle_user_terminal_stdin(&mut self, line: String) {
+        // Using legacy IL, maybe abandon this later to raw strings
         let cmd = DebuggerCommand::UserInput(line.trim_end().to_string());
         self.runtime.event_callback(cmd.into());
         self.dispatch_gdb_commands();
@@ -138,7 +140,7 @@ impl App {
     }
 
     fn dispatch_gdb_commands(&mut self) {
-        let cmds = self.runtime.value_to_gdb_commands();
+        let cmds = self.runtime.extract_gdb_commands();
         for cmd in cmds {
             self.gdb_handle.send(cmd).unwrap();
         }

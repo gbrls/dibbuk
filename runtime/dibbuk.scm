@@ -1,7 +1,10 @@
 ;
 (define (dibbuk/cmd l) (GdbCommandsReq l))
 (define (dibbuk/none) (EmptyReq))
+(define (dibbuk/reload) (Reload))
 (define (dibbuk/req? r) (Request? r))
+
+(define *a* 1337)
 
 (define *dibbuk-command* (dibbuk/none))
 (define *dibbuk-state* (hash))
@@ -17,10 +20,16 @@
 (define (eval-user-input str)
   (if (starts-with? str ":")
 
-    (displayln "=>" (->
-                     str
-                     (trim-start-matches ":")
-                     (eval-string)))
+    (let ((expr-result (->
+                        str
+                        (trim-start-matches ":")
+                        (eval-string))))
+      ;
+
+      (displayln "=>" expr-result)
+      expr-result
+      ;
+      )
 
     (dibbuk/cmd (list str))))
 
