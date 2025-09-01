@@ -45,10 +45,28 @@
 
     (dibbuk/cmd (list str))))
 
+(define *debug-registers* (hashset "rax" "rdi" "rbp" "rsp" "rdx" "rsi" "rip"))
+
+(define (debug-print-regs state)
+  (if (hash-contains? state 'register-state)
+    ; (displayln (hash-ref state 'register-state))
+
+    (displayln
+      (-> state
+        (hash-ref 'register-state)
+        (hash-keys->list)
+        (transduce (filtering (lambda (name) (hashset-contains? *debug-registers* name))) (into-list))
+        (transduce (mapping (lambda (name)
+                             (list name (hash-ref (hash-ref state 'register-state) name))))
+          (into-list))
+        ;
+        ))))
+
 (define (handle-event state event)
   (let (
         (result
           (event-case event
+
             ((ConsoleStream s)
               (displayln (trim-end-matches s "\n")))
 
@@ -65,7 +83,8 @@
 
             ((ExecAsync e)
               (if (string=? "stopped" (hash-ref e 'class))
-                (dibbuk/cmd (list "-data-list-changed-registers"))
+                (begin
+                  (dibbuk/cmd (list "-data-list-changed-registers")))
                 (dibbuk/none)))
 
             ((StatusAsync e)
@@ -74,6 +93,7 @@
             ((Result r)
               (let ((result (hash-ref r 'results)))
                 (event-case result
+
                   ((register-names regs)
                     (let ((pairs
                             (->
@@ -84,18 +104,46 @@
                         (hash-insert *dibbuk-state* 'register-ids
                           (fold (lambda (x acc) (hash-insert acc (first x) (second x))) (hash) pairs))
                         (dibbuk/none))))
+
                   ((changed-registers regs)
                     (letrec ((ids
                                (->
                                  (hash-ref regs 'List)
                                  (transduce (mapping (lambda (mp) (hash-ref mp 'Const))) (into-list))
                                  (string-join " ")))
-                             (cmd-str (string-append "-data-list-register-values " ids)))
+                             (cmd-str (string-append "-data-list-register-values x " ids)))
                       (begin
-                        (displayln cmd-str)
+                        ; (displayln cmd-str)
                         (dibbuk/cmd (list cmd-str)))))
-                  (else result))))
 
+                  ((register-values regs)
+                    (letrec ((pairs
+                               (->
+                                 (hash-ref regs 'List)
+                                 (transduce (mapping (lambda (mp) (hash-ref mp 'Tuple))) (into-list))
+                                 (transduce (mapping
+                                             (lambda (l)
+                                               (list
+                                                 (-> l (first) (second) (hash-ref 'Const) (string->int))
+                                                 (-> l (second) (second) (hash-ref 'Const)))))
+                                   (into-list))))
+                             (changed
+                               (fold (lambda (x acc)
+                                      (hash-insert
+                                        acc
+                                        (-> state (hash-ref 'register-ids) (hash-ref (first x)))
+                                        (second x)))
+                                 (hash)
+                                 pairs)))
+                      (list
+                        (hash-insert state 'register-state
+                          (hash-union changed
+                            (if (hash-contains? state 'register-state)
+                              (hash-ref state 'register-state)
+                              (hash))))
+                        (dibbuk/none))))
+
+                  (else result))))
             (else #false))))
 
     ; verbose debug prints

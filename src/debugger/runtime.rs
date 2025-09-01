@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use color_eyre::owo_colors::OwoColorize;
 use steel::{SteelVal, steel_vm::register_fn::RegisterFn};
 use steel_derive::Steel;
 
@@ -63,8 +64,8 @@ pub struct ScriptingRuntime {
 
 impl ScriptingRuntime {
     pub fn reload_main_with_state(&mut self, state: SteelVal) {
-        let program = std::fs::read_to_string(self.dibbuk_main_path.as_path());
-        self.vm.run(program.unwrap()).unwrap();
+        let program = std::fs::read_to_string(self.dibbuk_main_path.as_path()).unwrap();
+        self.vm.run(program.clone()).unwrap();
         // self.vm.register_value(DIBBUK_STATE, state);
         // NOTE: Maybe use `update_value` instead like this
         self.vm.update_value(DIBBUK_STATE, state).unwrap();
@@ -73,10 +74,23 @@ impl ScriptingRuntime {
     pub fn event_callback(&mut self, cmd: SteelVal) {
         let state = self.vm.extract_value("*dibbuk-state*").unwrap();
 
-        let _ = self
+        let res = self
             .vm
-            .call_function_by_name_with_args("dibbuk/handle-event", vec![state, cmd])
-            .unwrap();
+            .call_function_by_name_with_args("dibbuk/handle-event", vec![state, cmd]);
+
+        match res {
+            Ok(_) => {}
+            Err(e) => {
+                println!("{}", format!("Error on steel code: {:?}", e).yellow());
+                if let Some(span) = e.span() {
+                    let program = std::fs::read_to_string(self.dibbuk_main_path.as_path()).unwrap();
+                    let ctx = 32;
+                    let slice = &program
+                        [(span.start() - ctx).max(0)..(span.end() + ctx).min(program.len())];
+                    println!("{}", format!("-> Location\n{}", slice).red());
+                }
+            }
+        }
 
         let cmd = self
             .vm
