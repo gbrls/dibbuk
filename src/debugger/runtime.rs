@@ -65,9 +65,9 @@ impl ScriptingRuntime {
     pub fn reload_main_with_state(&mut self, state: SteelVal) {
         let program = std::fs::read_to_string(self.dibbuk_main_path.as_path());
         self.vm.run(program.unwrap()).unwrap();
-        self.vm.register_value(DIBBUK_STATE, state);
+        // self.vm.register_value(DIBBUK_STATE, state);
         // NOTE: Maybe use `update_value` instead like this
-        // self.vm.update_value(DIBBUK_STATE, state).unwrap();
+        self.vm.update_value(DIBBUK_STATE, state).unwrap();
     }
 
     pub fn event_callback(&mut self, cmd: SteelVal) {
@@ -82,8 +82,6 @@ impl ScriptingRuntime {
             .vm
             .extract::<RuntimeRequest>("*dibbuk-command*")
             .unwrap();
-
-        println!("command result: {:?}", cmd);
 
         match cmd {
             RuntimeRequest::Empty => {}

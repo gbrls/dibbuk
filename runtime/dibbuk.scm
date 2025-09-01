@@ -1,4 +1,19 @@
-;
+(define-syntax event-case
+  (syntax-rules ()
+    ((_ event
+        ((key var) body ...)
+        ...
+        (else else-body ...))
+      (cond
+        ((-> event hash? not) #false)
+        ((hash-contains? event 'key) (let ((var (hash-ref event 'key))) body ...))
+        ...
+        (#true else-body ...)))))
+
+; ===============
+; Aliases for Rust-defined  functions
+; ===============
+
 (define (dibbuk/cmd l) (GdbCommandsReq l))
 (define (dibbuk/none) (EmptyReq))
 (define (dibbuk/reload) (Reload))
@@ -33,86 +48,55 @@
 (define (handle-event state event)
   (let (
         (result
-          (cond
-            ((-> event hash? not) #false)
+          (event-case event
+            ((ConsoleStream s)
+              (displayln (trim-end-matches s "\n")))
 
-            ((hash-contains? event 'ConsoleStream)
-              (displayln (->
-                          event
-                          (hash-ref 'ConsoleStream)
-                          (trim-end-matches "\n"))))
+            ((LogStream s)
+              (displayln (trim-end-matches s "\n")))
 
-            ((hash-contains? event 'LogStream)
-              (displayln (->
-                          event
-                          (hash-ref 'LogStream)
-                          (trim-end-matches "\n"))))
+            ((UserInput s)
+              (eval-user-input s))
 
-            ((hash-contains? event 'UserInput)
-              (eval-user-input (hash-ref event 'UserInput)))
+            ((NotifyAsync e)
+              (if (string=? "thread-group-started" (hash-ref e 'class))
+                (dibbuk/cmd (list "-data-list-register-names"))
+                (dibbuk/none)))
 
-            ((hash-contains? event 'Result)
-              (let ((result (->
-                             event
-                             (hash-ref 'Result)
-                             (hash-ref 'results))))
-                (cond
-                  ((hash-contains? result 'register-names)
+            ((ExecAsync e)
+              (if (string=? "stopped" (hash-ref e 'class))
+                (dibbuk/cmd (list "-data-list-changed-registers"))
+                (dibbuk/none)))
+
+            ((StatusAsync e)
+              (hash-ref 'class e))
+
+            ((Result r)
+              (let ((result (hash-ref r 'results)))
+                (event-case result
+                  ((register-names regs)
                     (let ((pairs
                             (->
-                              result
-                              (hash-ref 'register-names)
-                              (hash-ref 'List)
+                              (hash-ref regs 'List)
                               (transduce (mapping (lambda (mp) (hash-ref mp 'Const))) (into-list))
-                              (transduce (enumerating) (into-list))
-                              ; (fold (lambda (x acc) (hash-insert acc (first x) (second x))))
-                              )))
+                              (transduce (enumerating) (into-list)))))
                       (list
                         (hash-insert *dibbuk-state* 'register-ids
                           (fold (lambda (x acc) (hash-insert acc (first x) (second x))) (hash) pairs))
-                        (dibbuk/none))
-                      ; (fold (lambda (x acc) x) pairs (hash))
-                      ; pairs
-                      ;
-                      ))
-                  ((hash-contains? result 'changed-registers)
+                        (dibbuk/none))))
+                  ((changed-registers regs)
                     (letrec ((ids
                                (->
-                                 result
-                                 (hash-ref 'changed-registers)
-                                 (hash-ref 'List)
+                                 (hash-ref regs 'List)
                                  (transduce (mapping (lambda (mp) (hash-ref mp 'Const))) (into-list))
                                  (string-join " ")))
                              (cmd-str (string-append "-data-list-register-values " ids)))
                       (begin
                         (displayln cmd-str)
                         (dibbuk/cmd (list cmd-str)))))
-                  (#true result))))
+                  (else result))))
 
-            ((hash-contains? event 'NotifyAsync)
-              (if (string=? "thread-group-started" (->
-                                                    event
-                                                    (hash-ref 'NotifyAsync)
-                                                    (hash-ref 'class)))
-                (dibbuk/cmd (list "-data-list-register-names"))
-                (dibbuk/none)))
-
-            ((hash-contains? event 'ExecAsync)
-              (if (string=? "stopped" (->
-                                       event
-                                       (hash-ref 'ExecAsync)
-                                       (hash-ref 'class)))
-                (dibbuk/cmd (list "-data-list-changed-registers"))
-                (dibbuk/none)))
-
-            ((hash-contains? event 'StatusAsync)
-              (->
-                event
-                (hash-ref 'StatusAsync)
-                (hash-ref 'class)))
-
-            ; default
-            (#true #false))))
+            (else #false))))
 
     ; verbose debug prints
     (if (and
