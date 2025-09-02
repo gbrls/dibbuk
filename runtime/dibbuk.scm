@@ -18,6 +18,23 @@
 (define (dibbuk/none) (EmptyReq))
 (define (dibbuk/reload) (Reload))
 (define (dibbuk/req? r) (Request? r))
+(define (dibbuk/state-and-command? result)
+  (and
+    (list? result)
+    (hash? (first result))
+    (dibbuk/req? (second result))))
+(define (dibbuk/next? result)
+  (or (dibbuk/state-and-command? result)
+    (dibbuk/req? result)))
+
+(define (dibbuk/make-next result state)
+  (cond
+    ((dibbuk/state-and-command? result) result)
+    ((dibbuk/req? result)
+      (list state result))
+    (#true
+      (list state (dibbuk/none)))))
+
 (define (rato/tick? r) (TermTick? r))
 (define (rato/clear) (TerminalClear))
 
@@ -44,7 +61,7 @@
                         (trim-start-matches ":")
                         (eval-string))))
       (displayln "=>" expr-result)
-      expr-result)
+      (if (dibbuk/next? expr-result) expr-result (dibbuk/none)))
     ; just send to gdb instead
     (dibbuk/cmd (list str))))
 
@@ -66,25 +83,33 @@
            (key (first k))
            (modifiers (second k))
            (should-eval? (and (string=? key "Return")
-                          (starts-with? command-buf ":")))
-
-           (runtime-command
-             (cond
-               ((and (string=? command-buf "") (string=? key "Return")) (dibbuk/reload))
-               (should-eval? (eval-user-command command-buf))
-               (#true (dibbuk/none))))
+                          (not (string=? command-buf ""))))
 
            (command-buf-next
              (cond
+               (should-eval? "")
                ((not control?) (string-append command-buf key))
                ((string=? key "Backspace") (substring command-buf 0 (max 0 (- (string-length command-buf) 1))))
-               (should-eval? "")
-               (#true command-buf))))
+               (#true command-buf)))
 
-    (displayln "\r=>" command-buf-next "\t" k control? should-eval?)
-    (list
-      (state-update state 'ui (hash *dibbuk-ui-command-buffer* command-buf-next))
-      runtime-command)))
+           (exec-result
+             (cond
+               (should-eval? (eval-user-command command-buf))
+               ((and (string=? command-buf "") (string=? key "Return")) (dibbuk/reload))
+               (#true (dibbuk/none))))
+           (updated-ui-state (state-update
+                              state
+                              'ui
+                              (hash *dibbuk-ui-command-buffer* command-buf-next)))
+           (merged-result (if (dibbuk/state-and-command? exec-result)
+                           (list
+                             (hash-insert (first exec-result) 'ui (hash-ref updated-ui-state 'ui)) ; move the updated UI state to the exec result state
+                             (second exec-result))
+                           exec-result)))
+
+    ; (displayln "\r=>" command-buf-next command-buf "\t" k control? should-eval?)
+    (displayln "\rdibbuk>" command-buf-next)
+    (dibbuk/make-next merged-result updated-ui-state)))
 
 (define *debug-registers* (hashset "rax" "rbx" "rdi" "rbp" "rsp" "rdx" "rsi" "rip"))
 
@@ -103,13 +128,24 @@
         ;
         ))))
 
+(define (draw-ui state)
+  ; (rato/clear)
+  ; (debug-print-regs state)
+  ; (displayln "\rHi")
+  ;
+  None)
+
 (define (handle-event state event)
   (let (
         (result
           (event-case event
 
+            ((TerminalUpdate e)
+              (if (string=? e "Tick")
+                (draw-ui state)))
+
             ((ConsoleStream s)
-              (displayln (trim-end-matches s "\n")))
+              (displayln "\r" (trim-end-matches s "\n")))
 
             ((LogStream s)
               ; Not sure what the semantics of a LogStream are on GDB MI, but it returns the user input here, so I'm doing nothing with it to not repeat the user input
@@ -198,7 +234,7 @@
     (if (and
          (hash-contains? *dibbuk-state* 'verbose)
          (hash-ref *dibbuk-state* 'verbose)
-         (hash? event))
+         (not (and (hash? event) (hash-contains? event 'TerminalUpdate) (string=? "Tick" (hash-ref event 'TerminalUpdate)))))
       (begin
 
         (displayln "\rinput event:")
@@ -209,16 +245,7 @@
 
     ; handle return logic, like understanding the format
     ; this is kinda error prone, so it's probably best to write a struct here
-    (cond
-      ((and
-          (list? result)
-          (hash? (first result))
-          (dibbuk/req? (second result)))
-        result)
-      ((dibbuk/req? result)
-        (list state result))
-      (#true
-        (list state (dibbuk/none))))))
+    (dibbuk/make-next result state)))
 
 ; Get PID
 ; thread-info

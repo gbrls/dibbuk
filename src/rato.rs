@@ -71,8 +71,15 @@ impl From<KeyCode> for ControlKeys {
 
 #[derive(Clone, Debug, Facet, Steel)]
 #[repr(u8)]
-pub enum TermEvent {
+pub enum Update {
     Tick,
+    Resize,
+}
+
+#[derive(Clone, Debug, Facet, Steel)]
+#[repr(u8)]
+pub enum TermEvent {
+    TerminalUpdate(Update),
     Key(char, u8),
     ControlKey(ControlKeys, u8),
     Unknown,
@@ -80,7 +87,7 @@ pub enum TermEvent {
 
 impl TermEvent {
     pub fn is_tick(e: &TermEvent) -> bool {
-        matches!(e, TermEvent::Tick)
+        matches!(e, TermEvent::TerminalUpdate(Update::Tick))
     }
 }
 
@@ -141,7 +148,7 @@ impl EventHandler {
                     break;
                   }
                   _ = tick_delay => {
-                    _sender.send(TermEvent::Tick).unwrap();
+                    _sender.send(TermEvent::TerminalUpdate(Update::Tick)).unwrap();
                   }
                   Some(Ok(evt)) = crossterm_event => {
                     _sender.send(evt.into()).unwrap();

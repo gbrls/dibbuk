@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use color_eyre::owo_colors::OwoColorize;
+use ratatui::widgets::Paragraph;
 use steel::{SteelVal, steel_vm::register_fn::RegisterFn};
 use steel_derive::Steel;
 
@@ -45,6 +46,8 @@ impl Builder {
         vm.register_fn("TerminalClear", || {
             RuntimeRequest::Term(TerminalRequest::Clear)
         });
+
+        // vm.register_fn("Paragrah", Paragraph::new);
 
         let dir: PathBuf = PathBuf::from(self.runtime_dir);
 
@@ -99,6 +102,7 @@ impl ScriptingRuntime {
                     let program = std::fs::read_to_string(self.dibbuk_main_path.as_path()).unwrap();
                     let ctx = 32;
                     let slice = &program
+                    // FIXME: this causes: (attempt to subtract with overflow)
                         [(span.start() - ctx).max(0)..(span.end() + ctx).min(program.len())];
                     println!("{}", format!("-> Location\n{}", slice).red());
                 }

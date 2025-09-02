@@ -78,6 +78,18 @@ impl App<CrosstermBackend<io::Stdout>> {
         let (user_terminal_stdin_tx, user_terminal_stdin_rx) = broadcast::channel::<String>(16);
         let stdin_task = spawn_user_terminal_stdin_task(user_terminal_stdin_tx);
         let gdb_stdout_rx = gdb_handle.subscribe_stdout();
+
+        let backend = CrosstermBackend::new(io::stdout());
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let events = rato::EventHandler::new(50);
+
+        crossterm::terminal::enable_raw_mode().unwrap();
+        io::stdout()
+            .execute(crossterm::terminal::EnterAlternateScreen)
+            .unwrap();
+
+        terminal.clear().unwrap();
+
         let runtime = crate::debugger::runtime::Builder::new().build();
         let mut watcher = notify::RecommendedWatcher::new(
             move |result: Result<Event>| match result {
@@ -106,17 +118,6 @@ impl App<CrosstermBackend<io::Stdout>> {
             )
             .unwrap();
 
-        let backend = CrosstermBackend::new(io::stdout());
-        let mut terminal = ratatui::Terminal::new(backend).unwrap();
-        let events = rato::EventHandler::new(50);
-
-        crossterm::terminal::enable_raw_mode().unwrap();
-        io::stdout()
-            .execute(crossterm::terminal::EnterAlternateScreen)
-            .unwrap();
-
-        terminal.clear().unwrap();
-
         App::<CrosstermBackend<io::Stdout>> {
             gdb_handle,
             runtime,
@@ -144,20 +145,20 @@ impl App<CrosstermBackend<io::Stdout>> {
             }
             None => {}
         }
+
+        self.dispatch_gdb_commands();
     }
 
     fn handle_user_terminal_stdin(&mut self, line: String) {
         // Using legacy IL, maybe abandon this later to raw strings
         let cmd = DebuggerCommand::UserInput(line.trim_end().to_string());
         self.runtime_update(cmd.into());
-        self.dispatch_gdb_commands();
     }
 
     fn handle_gdb_stdout(&mut self, line: String) {
         if let Ok(mi) = gdb::mi::parse(line.as_str()) {
             // TODO: the ideal version would be to return a SteelVal and pass it to the function below
             self.runtime_update(mi.into());
-            self.dispatch_gdb_commands();
         }
     }
 
@@ -180,6 +181,12 @@ impl App<CrosstermBackend<io::Stdout>> {
                     .unwrap();
                 crossterm::terminal::disable_raw_mode().unwrap();
             }
+
+            rato::TermEvent::TerminalUpdate(rato::Update::Tick) => {
+                // self.terminal_handle.clear().unwrap();
+                self.runtime_update(evt.into());
+            }
+
             evt => {
                 self.runtime_update(evt.into());
             }
