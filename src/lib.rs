@@ -7,6 +7,7 @@ pub mod gdb;
 pub mod il;
 pub mod io;
 pub mod process_ui;
+pub mod rato;
 // pub mod theme;
 // pub mod tui;
 

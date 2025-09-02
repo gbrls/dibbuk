@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io;
 
 use crate::debugger::runtime::{RuntimeRequest, ScriptingRuntime};
 use crate::debugger::test::RecordingBuilder;
@@ -6,6 +7,9 @@ use crate::gdb::mi::MiRecord;
 use crate::gdb::process::GdbHandle;
 use crate::il::DebuggerCommand;
 use crate::{gdb, il};
+use crossterm::ExecutableCommand;
+use crossterm::event::{KeyCode, KeyEvent};
+use ratatui::prelude::{Backend, CrosstermBackend};
 use steel::SteelVal;
 use steel::rvals::SteelHashMap;
 use steel::steel_vm::{engine::Engine, register_fn::RegisterFn};
@@ -14,20 +18,24 @@ use steel_repl;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::{broadcast, mpsc};
 
-use notify::{Event, RecursiveMode, Result, Watcher};
+use notify::{Event, EventHandler, RecursiveMode, Result, Watcher};
 use tokio::task::JoinHandle;
+
+use crate::rato;
 
 pub enum DibbukError {
     FileWatch,
 }
 
-pub struct App {
+pub struct App<B: Backend> {
     runtime: ScriptingRuntime,
     gdb_stdout: broadcast::Receiver<String>,
     running: bool,
     gdb_handle: GdbHandle,
     user_terminal_stdin: broadcast::Receiver<String>,
     runtime_fs_events_rx: mpsc::Receiver<Event>,
+    tui_event_handler: rato::EventHandler,
+    terminal_handle: ratatui::Terminal<B>,
 }
 
 fn get_mi_events() -> SteelVal {
@@ -49,31 +57,28 @@ fn spawn_user_terminal_stdin_task(
     user_terminal_stdin_tx: broadcast::Sender<String>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let mut reader = BufReader::new(tokio::io::stdin());
-        let mut buf = String::new();
-        loop {
-            buf.clear();
-            match reader.read_line(&mut buf).await {
-                Ok(0) => break, // EOF
-                Ok(_) => {
-                    let _ = user_terminal_stdin_tx.send(buf.clone());
-                }
-                Err(_) => break,
-            }
-        }
+        // let mut reader = BufReader::new(tokio::io::stdin());
+        // let mut buf = String::new();
+        // loop {
+        //     buf.clear();
+        //     match reader.read_line(&mut buf).await {
+        //         Ok(0) => break, // EOF
+        //         Ok(_) => {
+        //             let _ = user_terminal_stdin_tx.send(buf.clone());
+        //         }
+        //         Err(_) => break,
+        //     }
+        // }
     })
 }
 
-impl App {
+impl App<CrosstermBackend<io::Stdout>> {
     pub fn new(gdb_handle: GdbHandle) -> Self {
         let (fs_changes_tx, fs_changes_rx) = mpsc::channel::<Event>(16);
-
         let (user_terminal_stdin_tx, user_terminal_stdin_rx) = broadcast::channel::<String>(16);
         let stdin_task = spawn_user_terminal_stdin_task(user_terminal_stdin_tx);
         let gdb_stdout_rx = gdb_handle.subscribe_stdout();
-
         let runtime = crate::debugger::runtime::Builder::new().build();
-
         let mut watcher = notify::RecommendedWatcher::new(
             move |result: Result<Event>| match result {
                 Ok(event) => {
@@ -87,7 +92,6 @@ impl App {
             notify::Config::default(),
         )
         .unwrap();
-
         watcher
             .watch(
                 &runtime
@@ -102,13 +106,26 @@ impl App {
             )
             .unwrap();
 
-        App {
+        let backend = CrosstermBackend::new(io::stdout());
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let events = rato::EventHandler::new(50);
+
+        crossterm::terminal::enable_raw_mode().unwrap();
+        io::stdout()
+            .execute(crossterm::terminal::EnterAlternateScreen)
+            .unwrap();
+
+        terminal.clear().unwrap();
+
+        App::<CrosstermBackend<io::Stdout>> {
             gdb_handle,
             runtime,
             running: true,
             gdb_stdout: gdb_stdout_rx,
             user_terminal_stdin: user_terminal_stdin_rx,
             runtime_fs_events_rx: fs_changes_rx,
+            tui_event_handler: events,
+            terminal_handle: terminal,
         }
     }
 
@@ -120,23 +137,53 @@ impl App {
         }
     }
 
+    fn runtime_update(&mut self, command: SteelVal) {
+        match self.runtime.event_callback(command) {
+            Some(super::runtime::TerminalRequest::Clear) => {
+                self.terminal_handle.clear().unwrap();
+            }
+            None => {}
+        }
+    }
+
     fn handle_user_terminal_stdin(&mut self, line: String) {
         // Using legacy IL, maybe abandon this later to raw strings
         let cmd = DebuggerCommand::UserInput(line.trim_end().to_string());
-        self.runtime.event_callback(cmd.into());
+        self.runtime_update(cmd.into());
         self.dispatch_gdb_commands();
     }
 
     fn handle_gdb_stdout(&mut self, line: String) {
         if let Ok(mi) = gdb::mi::parse(line.as_str()) {
             // TODO: the ideal version would be to return a SteelVal and pass it to the function below
-            self.runtime.event_callback(mi.into());
+            self.runtime_update(mi.into());
             self.dispatch_gdb_commands();
         }
     }
 
     fn handle_runtime_fs_event(&mut self, evt: Event) {
         println!("received!!!! {evt:?}");
+    }
+
+    fn handle_tui_event(&mut self, evt: rato::TermEvent) {
+        use crossterm::event::Event;
+        use crossterm::event::KeyCode;
+        use crossterm::event::KeyEvent;
+        match evt {
+            rato::TermEvent::Key(key, modifiers)
+                if key == 'c' && ((modifiers & rato::CONTROL) != 0) =>
+            {
+                self.running = false;
+
+                io::stdout()
+                    .execute(crossterm::terminal::LeaveAlternateScreen)
+                    .unwrap();
+                crossterm::terminal::disable_raw_mode().unwrap();
+            }
+            evt => {
+                self.runtime_update(evt.into());
+            }
+        }
     }
 
     fn dispatch_gdb_commands(&mut self) {
@@ -149,6 +196,7 @@ impl App {
     async fn poll_events(&mut self) {
         tokio::select! {
             Some(evt) = self.runtime_fs_events_rx.recv() => self.handle_runtime_fs_event(evt),
+            Ok(evt) = self.tui_event_handler.next() => self.handle_tui_event(evt),
             Ok(line) = self.gdb_stdout.recv() => self.handle_gdb_stdout(line),
             Ok(line) = self.user_terminal_stdin.recv() => self.handle_user_terminal_stdin(line),
             _ = tokio::time::sleep(tokio::time::Duration::from_millis(20)) => {

@@ -4,6 +4,8 @@ use color_eyre::owo_colors::OwoColorize;
 use steel::{SteelVal, steel_vm::register_fn::RegisterFn};
 use steel_derive::Steel;
 
+use crate::rato;
+
 static DIBBUK_COMMAND: &'static str = "*dibbuk-command*";
 static DIBBUK_STATE: &'static str = "*dibbuk-state*";
 
@@ -12,6 +14,12 @@ pub enum RuntimeRequest {
     Empty,
     GdbCommand(Vec<SteelVal>),
     Reload,
+    Term(TerminalRequest),
+}
+
+#[derive(Debug, Clone, Steel)]
+pub enum TerminalRequest {
+    Clear,
 }
 
 pub struct Builder {
@@ -29,9 +37,14 @@ impl Builder {
         let mut vm = steel::steel_vm::engine::Engine::new();
 
         vm.register_type::<RuntimeRequest>("Request?");
+        vm.register_type::<rato::TermEvent>("TermEvent?");
         vm.register_fn("EmptyReq", || RuntimeRequest::Empty);
         vm.register_fn("Reload", || RuntimeRequest::Reload);
         vm.register_fn("GdbCommandsReq", RuntimeRequest::GdbCommand);
+        vm.register_fn("TermTick?", rato::TermEvent::is_tick);
+        vm.register_fn("TerminalClear", || {
+            RuntimeRequest::Term(TerminalRequest::Clear)
+        });
 
         let dir: PathBuf = PathBuf::from(self.runtime_dir);
 
@@ -71,7 +84,7 @@ impl ScriptingRuntime {
         self.vm.update_value(DIBBUK_STATE, state).unwrap();
     }
 
-    pub fn event_callback(&mut self, cmd: SteelVal) {
+    pub fn event_callback(&mut self, cmd: SteelVal) -> Option<TerminalRequest> {
         let state = self.vm.extract_value("*dibbuk-state*").unwrap();
 
         let res = self
@@ -98,14 +111,16 @@ impl ScriptingRuntime {
             .unwrap();
 
         match cmd {
-            RuntimeRequest::Empty => {}
-            RuntimeRequest::GdbCommand(steel_vals) => {}
+            RuntimeRequest::Empty => None,
+            RuntimeRequest::GdbCommand(steel_vals) => None,
             RuntimeRequest::Reload => {
                 let state = self.vm.extract_value("*dibbuk-state*").unwrap();
                 println!("realoading state...");
                 self.reload_main_with_state(state);
                 println!("state reloaded!");
+                None
             }
+            RuntimeRequest::Term(term) => Some(term),
         }
     }
 
