@@ -81,7 +81,7 @@ impl App<CrosstermBackend<io::Stdout>> {
 
         let backend = CrosstermBackend::new(io::stdout());
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
-        let events = rato::EventHandler::new(50);
+        let events = rato::EventHandler::new(20);
 
         crossterm::terminal::enable_raw_mode().unwrap();
         io::stdout()
@@ -146,6 +146,20 @@ impl App<CrosstermBackend<io::Stdout>> {
             None => {}
         }
 
+        self.terminal_handle
+            .draw(|frame| {
+                frame.set_cursor_position(ratatui::layout::Position { x: 0, y: 0 });
+                let w = self.runtime.extract_rato_ui();
+                frame.render_widget(
+                    &w,
+                    frame.area().inner(ratatui::layout::Margin {
+                        horizontal: 5,
+                        vertical: 5,
+                    }),
+                );
+            })
+            .unwrap();
+
         self.dispatch_gdb_commands();
     }
 
@@ -180,11 +194,6 @@ impl App<CrosstermBackend<io::Stdout>> {
                     .execute(crossterm::terminal::LeaveAlternateScreen)
                     .unwrap();
                 crossterm::terminal::disable_raw_mode().unwrap();
-            }
-
-            rato::TermEvent::TerminalUpdate(rato::Update::Tick) => {
-                // self.terminal_handle.clear().unwrap();
-                self.runtime_update(evt.into());
             }
 
             evt => {

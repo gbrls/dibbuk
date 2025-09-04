@@ -9,6 +9,7 @@ use crate::rato;
 
 static DIBBUK_COMMAND: &'static str = "*dibbuk-command*";
 static DIBBUK_STATE: &'static str = "*dibbuk-state*";
+static RATO_UI: &'static str = "*rato-ui-str*";
 
 #[derive(Debug, Clone, Steel)]
 pub enum RuntimeRequest {
@@ -65,6 +66,14 @@ impl Builder {
 
         let program = std::fs::read_to_string(dibbuk_main_path.as_path());
         vm.run(program.unwrap()).unwrap();
+        vm.update_value(
+            RATO_UI,
+            rato::Widget::Paragraph(rato::Paragraph {
+                text: "RATATAATATA".into(),
+                bordered: true,
+            })
+            .into(),
+        );
 
         ScriptingRuntime {
             vm: vm,
@@ -125,6 +134,16 @@ impl ScriptingRuntime {
                 None
             }
             RuntimeRequest::Term(term) => Some(term),
+        }
+    }
+
+    pub fn extract_rato_ui(&mut self) -> rato::Widget {
+        let steel_val = self.vm.extract_value(RATO_UI).unwrap();
+        if let SteelVal::StringV(s) = steel_val {
+            let s = format!("{}", s);
+            s.into()
+        } else {
+            rato::Widget::Empty
         }
     }
 

@@ -1,8 +1,10 @@
 //
 
 use anyhow::{Context, Result};
+use color_eyre::owo_colors::OwoColorize;
 use crossterm::event::{Event as CrosstermEvent, KeyCode, KeyEvent, MouseEvent};
 use futures::{FutureExt, StreamExt};
+use ratatui::prelude::*;
 use std::time::Duration;
 use steel::SteelVal;
 use steel_derive::Steel;
@@ -18,6 +20,81 @@ pub const SUPER: u8 = 0b0000_1000;
 pub const HYPER: u8 = 0b0001_0000;
 pub const META: u8 = 0b0010_0000;
 pub const NONE: u8 = 0b0000_0000;
+
+#[derive(Debug, Clone, Steel, Facet)]
+pub struct Paragraph {
+    pub text: String,
+    pub bordered: bool,
+}
+
+#[derive(Debug, Clone, Steel, Facet)]
+pub struct Block {
+    pub bordered: bool,
+}
+
+#[derive(Debug, Clone, Steel, Facet)]
+#[repr(u8)]
+pub enum Widget {
+    Paragraph(Paragraph),
+    Block(Block),
+    List(Vec<String>),
+    Empty,
+}
+
+impl Into<String> for Widget {
+    fn into(self) -> String {
+        self::to_string(&self)
+    }
+}
+
+impl From<String> for Widget {
+    fn from(value: String) -> Self {
+        self::from_str(value.as_str()).unwrap()
+    }
+}
+
+impl Into<SteelVal> for Widget {
+    fn into(self) -> SteelVal {
+        let str: String = self.into();
+        SteelVal::StringV(str.into())
+    }
+}
+
+impl ratatui::prelude::Widget for &Widget {
+    fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer)
+    where
+        Self: Sized,
+    {
+        match self {
+            Widget::Paragraph(Paragraph { text, bordered }) => {
+                let p = ratatui::widgets::Paragraph::new(text.as_str());
+                let p = if *bordered {
+                    p.block(ratatui::widgets::Block::bordered())
+                } else {
+                    p
+                };
+                p.render(area, buf);
+            }
+            Widget::Block(block) => todo!(),
+            Widget::Empty => {
+                let p =
+                    ratatui::widgets::Paragraph::new("empty! klum!").style(Style::default().red());
+                p.render(area, buf);
+            }
+            Widget::List(l) => {
+                let l = l.iter().map(|s| s.as_str());
+                let p = ratatui::widgets::List::new(l);
+                ratatui::widgets::Widget::render(p, area, buf);
+                //
+            }
+        }
+    }
+}
+
+// pub fn steel_repr(w: Widget) {
+//     let vm = steel::steel_vm::engine::Engine::new();
+//     // vm.regis
+// }
 
 #[derive(Clone, Debug, Facet, Steel)]
 #[repr(u8)]
@@ -169,5 +246,26 @@ impl EventHandler {
     /// there is no data available and it's possible for more data to be sent.
     pub async fn next(&mut self) -> Result<TermEvent> {
         self.receiver.recv().await.context("Event handler errror")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn print_serialized(w: Widget) {
+        let s: String = w.into();
+        println!("{:#?}", s);
+    }
+
+    #[test]
+    fn serialize_widget() {
+        let p = Paragraph {
+            text: "Hello RATO!".into(),
+            bordered: true,
+        };
+
+        print_serialized(Widget::Paragraph(p));
+        print_serialized(Widget::List(vec!["hi".into(), "there".into()]));
     }
 }
