@@ -5,7 +5,7 @@ use ratatui::widgets::Paragraph;
 use steel::{SteelVal, steel_vm::register_fn::RegisterFn};
 use steel_derive::Steel;
 
-use crate::rato;
+use crate::rato::{self, LayoutNode, RatoUI};
 
 static DIBBUK_COMMAND: &'static str = "*dibbuk-command*";
 static DIBBUK_STATE: &'static str = "*dibbuk-state*";
@@ -26,13 +26,21 @@ pub enum TerminalRequest {
 
 pub struct Builder {
     pub runtime_dir: String,
+    log_vm: bool,
 }
 
 impl Builder {
     pub fn new() -> Self {
         Builder {
             runtime_dir: "./runtime".into(),
+            log_vm: false,
         }
+    }
+
+    pub fn log(self, should: bool) -> Self {
+        let mut builder = self;
+        builder.log_vm = should;
+        builder
     }
 
     pub fn build(self) -> ScriptingRuntime {
@@ -59,25 +67,30 @@ impl Builder {
         let mut dibbuk_main_path = dir.clone();
         dibbuk_main_path.push("dibbuk.scm");
 
-        println!(
-            "adding runtime to path {:?}",
-            dibbuk_main_path.as_path().canonicalize()
-        );
+        // println!(
+        // "adding runtime to path {:?}",
+        // dibbuk_main_path.as_path().canonicalize()
+        // );
 
         let program = std::fs::read_to_string(dibbuk_main_path.as_path());
         vm.run(program.unwrap()).unwrap();
         vm.update_value(
             RATO_UI,
-            rato::Widget::Paragraph(rato::Paragraph {
-                text: "RATATAATATA".into(),
-                bordered: true,
-            })
+            RatoUI {
+                widgets: vec![],
+                layout: LayoutNode {
+                    children: vec![],
+                    mode: rato::LayoutMode::Single,
+                },
+            }
             .into(),
         );
 
         ScriptingRuntime {
             vm: vm,
             dibbuk_main_path,
+            log_vm: self.log_vm,
+            logs: vec![],
         }
     }
 }
@@ -85,6 +98,8 @@ impl Builder {
 pub struct ScriptingRuntime {
     pub vm: steel::steel_vm::engine::Engine,
     pub dibbuk_main_path: PathBuf,
+    pub log_vm: bool,
+    pub logs: Vec<(String, String)>,
 }
 
 impl ScriptingRuntime {
@@ -101,7 +116,7 @@ impl ScriptingRuntime {
 
         let res = self
             .vm
-            .call_function_by_name_with_args("dibbuk/handle-event", vec![state, cmd]);
+            .call_function_by_name_with_args("dibbuk/handle-event", vec![state, cmd.clone()]);
 
         match res {
             Ok(_) => {}
@@ -112,38 +127,43 @@ impl ScriptingRuntime {
                     let ctx = 32;
                     let slice = &program
                     // FIXME: this causes: (attempt to subtract with overflow)
-                        [(span.start() - ctx).max(0)..(span.end() + ctx).min(program.len())];
+                        [(span.start()).max(0)..(span.end() + ctx).min(program.len())];
                     println!("{}", format!("-> Location\n{}", slice).red());
                 }
             }
         }
 
-        let cmd = self
-            .vm
-            .extract::<RuntimeRequest>("*dibbuk-command*")
-            .unwrap();
+        let runtime_cmd = self.vm.extract::<RuntimeRequest>("*dibbuk-command*");
+        let state = self.vm.extract_value("*dibbuk-state*").unwrap();
 
-        match cmd {
-            RuntimeRequest::Empty => None,
-            RuntimeRequest::GdbCommand(steel_vals) => None,
-            RuntimeRequest::Reload => {
-                let state = self.vm.extract_value("*dibbuk-state*").unwrap();
+        if self.log_vm {
+            self.logs.push((cmd.to_string(), state.to_string()));
+        }
+
+        match runtime_cmd {
+            Ok(RuntimeRequest::Empty) => None,
+            Ok(RuntimeRequest::GdbCommand(steel_vals)) => None,
+            Ok(RuntimeRequest::Reload) => {
                 println!("realoading state...");
                 self.reload_main_with_state(state);
                 println!("state reloaded!");
                 None
             }
-            RuntimeRequest::Term(term) => Some(term),
+            Ok(RuntimeRequest::Term(term)) => Some(term),
+            Err(_) => {
+                // TODO: handle the error
+                None
+            }
         }
     }
 
-    pub fn extract_rato_ui(&mut self) -> rato::Widget {
+    pub fn extract_rato_ui(&mut self) -> Option<rato::RatoUI> {
         let steel_val = self.vm.extract_value(RATO_UI).unwrap();
         if let SteelVal::StringV(s) = steel_val {
             let s = format!("{}", s);
-            s.into()
+            Some(s.into())
         } else {
-            rato::Widget::Empty
+            None
         }
     }
 

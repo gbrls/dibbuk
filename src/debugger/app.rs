@@ -146,17 +146,19 @@ impl App<CrosstermBackend<io::Stdout>> {
             None => {}
         }
 
+        // self.terminal_handle.clear().unwrap();
         self.terminal_handle
             .draw(|frame| {
-                frame.set_cursor_position(ratatui::layout::Position { x: 0, y: 0 });
-                let w = self.runtime.extract_rato_ui();
-                frame.render_widget(
-                    &w,
-                    frame.area().inner(ratatui::layout::Margin {
-                        horizontal: 5,
-                        vertical: 5,
-                    }),
-                );
+                let ui = self.runtime.extract_rato_ui();
+                // println!("UI {:?}", ui);
+                let area = frame.area().inner(ratatui::layout::Margin {
+                    horizontal: 10,
+                    vertical: 0,
+                });
+                if ui.is_some() {
+                    let ui = ui.unwrap();
+                    frame.render_widget(&ui, area);
+                }
             })
             .unwrap();
 

@@ -1,10 +1,67 @@
 ; (require "~/")
 
+; {
+;   "widgets": [
+;     {
+;       "Paragraph": {
+;         "text": "Hello RATO!",
+;         "bordered": true
+;       }
+;     },
+;     {
+;       "List": [
+;         [
+;           "hi",
+;           "there"
+;         ],
+;         0
+;       ]
+;     }
+;   ],
+;   "layout": {
+;     "children": [
+;       {
+;         "children": [],
+;         "mode": "Single"
+;       },
+;       {
+;         "children": [],
+;         "mode": "Single"
+;       }
+;     ],
+;     "mode": "SplitV"
+;   }
+; }
+;
+
+(define (rato/layout children mode)
+  (hash 'children children 'mode mode))
+
+(define (rato/layout-single)
+  (rato/layout (list) 'Single))
+
+(define (rato/layout-horizontal-2)
+  (rato/layout
+    (list
+      (rato/layout-single)
+      (rato/layout-single))
+    'SplitH))
+
+(define (rato/layout-vertical-2)
+  (rato/layout
+    (list
+      (rato/layout-single)
+      (rato/layout-single))
+    'SplitV))
+
+(define (rato/ui widgets layout)
+  (hash 'widgets widgets 'layout layout))
+
 (define (rato/paragraph text)
   (hash 'Paragraph (hash 'bordered #true 'text text)))
 
-(define (rato/list items)
-  (hash 'List items))
+(define (rato/list items #:focused [focused 0] #:bordered [bordered #true])
+  (hash 'List (list items focused bordered)))
 
 (define-syntax event-case
   (syntax-rules ()
@@ -66,11 +123,14 @@
   (set! *dibbuk-command* (dibbuk/cmd (list "a" "b"))))
 
 (define (update-command-history state str)
-  (letrec ((state-history (hash-get! state (list 'ui 'command-history)))
-           (history (if (list? state-history)
-                     (append state-history (list str))
-                     (list str))))
-    (hash-nested-insert state (list 'ui) (hash 'command-history history))))
+  (letrec ((history (hash-get! state (list 'ui 'command-history) #:default (list))))
+    (-> state
+      (hash-nested-insert
+        (list 'ui)
+        (hash
+          'command-history
+          (append history (list str))))
+      (hash-nested-insert (list 'ui 'history) (hash 'focus (+ 1 (length history)))))))
 
 (define (eval-user-command state str)
   (if (starts-with? str ":")
@@ -98,17 +158,17 @@
            (new-substate (hash-union value old-substate)))
     (hash-insert state key new-substate)))
 
-(define (hash-get! h keys)
+(define (hash-get! h keys #:default [default void])
   (cond
     ((empty? keys) h)
     ((= 1 (length keys))
       (if (hash-contains? h (first keys))
         (hash-ref h (first keys))
-        None))
+        default))
     (#true
       (if (hash-contains? h (first keys))
-        (hash-get! (hash-ref h (first keys)) (cdr keys))
-        None))))
+        (hash-get! (hash-ref h (first keys)) (cdr keys) #:default default)
+        default))))
 
 (define (hash-nested-insert h keys value)
   (cond
@@ -132,14 +192,23 @@
 
 (define (handle-tab state)
   (letrec ((current
-             (if (hash-contains? (hash-ref state 'ui) 'current-widget)
-               (hash-get! state (list 'ui 'current-widget))
-               'history))
+             (hash-get! state (list 'ui 'current-widget) #:default 'history))
            (next
              (cond
                ((symbol=? current 'history) 'registers)
                ((symbol=? current 'registers) 'history))))
     (hash-nested-insert state (list 'ui) (hash 'current-widget next))))
+
+(define (handle-ctrl-up state)
+  (let ((cur (hash-get! state (list 'ui 'history 'focus) #:default 0)))
+
+    (hash-nested-insert state (list 'ui 'history) (hash 'focus (max 8 (- cur 8))))))
+
+(define (handle-ctrl-down state)
+  (let ((cur (hash-get! state (list 'ui 'history 'focus) #:default 0))
+        (max-len (length (hash-get! state (list 'ui 'command-history) #:default (list)))))
+
+    (hash-nested-insert state (list 'ui 'history) (hash 'focus (min max-len (+ cur 8))))))
 
 (define (handle-user-key k state #:control [control? #false])
   (letrec ((has-ui (hash-contains? state 'ui))
@@ -157,7 +226,7 @@
            (command-buf-next
              (cond
                (should-eval? "")
-               ((not control?) (string-append command-buf key))
+               ((and (not control?) (not (>= modifiers 1))) (string-append command-buf key))
                ((string=? key "Backspace") (substring command-buf 0 (max 0 (- (string-length command-buf) 1))))
                (#true command-buf)))
 
@@ -166,6 +235,8 @@
                (should-eval? (eval-user-command state command-buf))
                ((and (string=? command-buf "") (string=? key "Return")) (dibbuk/reload))
                ((string=? key "Tab") (list (handle-tab state) (dibbuk/none)))
+               ((and (string=? key "u") (= modifiers 2)) (list (handle-ctrl-up state) (dibbuk/none)))
+               ((and (string=? key "d") (= modifiers 2)) (list (handle-ctrl-down state) (dibbuk/none)))
                (#true (dibbuk/none))))
            (updated-ui-state (hash-nested-insert
                               (if (dibbuk/state-and-command? exec-result)
@@ -183,6 +254,7 @@
     ; (displayln "\rdibbuk>" command-buf-next)
     (dibbuk/make-next updated-ui-state merged-result)))
 
+; (define *debug-registers* (hashset "rip"))
 (define *debug-registers* (hashset "rax" "rbx" "rdi" "rbp" "rsp" "rdx" "rsi" "rip"))
 
 (define (debug-print-regs state)
@@ -197,7 +269,8 @@
                            (string-append name " " (hash-ref (hash-ref state 'register-state) name))))
         (into-list))
       ;
-      )))
+      )
+    (list)))
 
 (define (ui/registers state)
   (hash-nested-insert
@@ -205,36 +278,25 @@
     (list 'ui 'registers)
     (hash 'widget (rato/list (debug-print-regs state)))))
 
+; TODO: add a title that says 13/37 when the focus is shifted up
 (define (ui/history state)
   (letrec
-    ((hist (hash-get! state (list 'ui 'command-history)))
+    ((hist (hash-get! state (list 'ui 'command-history) #:default (list "... Empty!")))
       (hist-list (append
-                  (if (list? hist)
-                    hist
-                    (list "...empty"))
+                  hist
                   (list
-                    (string-append "dibbuk> " (hash-get! state (list 'ui 'command-buffer)))))))
+                    (string-append "dibbuk> " (hash-get! state (list 'ui 'command-buffer) #:default ""))))))
 
-    (hash-nested-insert state (list 'ui 'history) (hash 'widget (rato/list hist-list)))))
+    (hash-nested-insert state
+      (list 'ui 'history)
+      (hash 'widget (rato/list hist-list #:focused (hash-get! state (list 'ui 'history 'focus) #:default (length hist-list)))))))
 
 (define (draw-ui state)
   ; (rato/clear)
   ; (debug-print-regs state)
   ; (displayln "\rHi")
   ;
-  (letrec ((regs-str (if (hash-contains? state 'register-state)
-                      (debug-print-regs state)
-                      "..."))
-           (hist (hash-get! state (list 'ui 'command-history)))
-           (hist-list (append
-                       (if (list? hist)
-                         hist
-                         (list "...empty"))
-                       (list
-                         (string-append "dibbuk> " (hash-get! state (list 'ui 'command-buffer))))))
-           (current-widget (if (-> state (hash-ref 'ui) (hash-contains? 'current-widget))
-                            (-> state (hash-ref 'ui) (hash-ref 'current-widget))
-                            'history))
+  (letrec ((current-widget (hash-get! state (list 'ui 'current-widget) #:default 'history))
            (updated-state
              (->
                state
@@ -244,7 +306,27 @@
     (list (hash-insert
            updated-state
            'rato-ui
-           (hash-get! updated-state (list 'ui current-widget 'widget)))
+           ; (hash-get!
+           ;   updated-state
+           ;   (list 'ui current-widget 'widget)
+           ;   #:default
+           ;   (rato/paragraph "loading..."))
+           (rato/ui (list
+                     (hash-get! updated-state (list 'ui 'registers 'widget) #:default (rato/paragraph "...ops"))
+                     ;
+                     (hash-get! updated-state (list 'ui 'history 'widget) #:default (rato/paragraph "...ops"))
+                     (rato/list (list "a" "b" "c"))
+                     (rato/paragraph "bottom")
+                     ;
+                     )
+             (rato/layout
+               (list
+                 (rato/layout-single)
+                 (rato/layout
+                   (list (rato/layout-single)
+                     (rato/layout (list (rato/layout-single) (rato/layout-single)) 'SplitV))
+                   'SplitH))
+               'SplitV)))
       (dibbuk/none))))
 
 ; #hash((Paragraph . '#hash((bordered . #true) (text . "RATATAATATA"))))
@@ -261,19 +343,22 @@
 
             ((ConsoleStream s)
               (list
-                (update-command-history state s)
+                (update-command-history state (to-string s))
                 (dibbuk/none)))
 
             ((LogStream s)
               ; Not sure what the semantics of a LogStream are on GDB MI, but it returns the user input here, so I'm doing nothing with it to not repeat the user input
               ; (displayln (trim-end-matches s "\n"))
-              (trim-end-matches s "\n"))
+              (list
+                (update-command-history state s)
+                (dibbuk/none)))
 
             ((UserInput s)
               (eval-user-command state s))
 
             ((Key k)
               (handle-user-key k state))
+
             ((ControlKey k)
               (handle-user-key k state #:control #true))
 
@@ -347,13 +432,15 @@
                   (else result))))
             (else #false))))
 
-    ; verbose debug prints
     (if (and
-         (hash-contains? *dibbuk-state* 'verbose)
-         (hash-ref *dibbuk-state* 'verbose)
-         (not (and (hash? event) (hash-contains? event 'TerminalUpdate) (string=? "Tick" (hash-ref event 'TerminalUpdate)))))
+         (hash-get! state (list 'verbose))
+         ; (not
+         ;   (and
+         ;     (hash? event)
+         ;     (string=? "Tick" (hash-get! event (list 'TerminalUpdate) #:default ""))))
+         ;
+         )
       (->
-
         state
         (update-command-history "[debug] event:")
         (update-command-history (to-string event))
@@ -361,11 +448,7 @@
         (update-command-history (to-string result))
         (dibbuk/make-next result))
 
-      (dibbuk/make-next state result))
-
-    ; handle return logic, like understanding the format
-    ; this is kinda error prone, so it's probably best to write a struct here
-    ))
+      (dibbuk/make-next state result))))
 
 ; Get PID
 ; thread-info
