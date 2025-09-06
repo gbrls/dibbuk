@@ -1,13 +1,16 @@
-dibbuk: GDB possessed by a lispy spirit
+dibbuk: A GDB TUI possessed by a lispy spirit
 
-dbk: dibbuk, a tui for gdb
 
-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaasdfasdfasdfasdfasjm;lkajsdf;lkj;lkasjd;lfasdfasdfasdfasdfasdfasdeeeeeeee?
+d ss    d d ss.  d ss.  d       b d     S 
+S   ~o  S S    b S    b S       S S    P  
+S     b S S    P S    P S       S Ssss'   
+S     S S S sSS' S sSS' S       S S   s   
+S     P S S    b S    b S       S S    b  
+S    S  S S    P S    P  S     S  S     b 
+P ss"   P P `SS  P `SS    "sss"   P     P 
+                                          
 
 - default layouts
 - modal input 
 - vim keybindings
 - press ? for help
-
-- known bugs:
-    - gdb user input is shifted by one
