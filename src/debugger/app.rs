@@ -88,7 +88,7 @@ impl App<CrosstermBackend<io::Stdout>> {
             .execute(crossterm::terminal::EnterAlternateScreen)
             .unwrap();
 
-        terminal.clear().unwrap();
+        // terminal.clear().unwrap();
 
         let runtime = crate::debugger::runtime::Builder::new().build();
         let mut watcher = notify::RecommendedWatcher::new(

@@ -5,7 +5,10 @@ use ratatui::widgets::Paragraph;
 use steel::{SteelVal, steel_vm::register_fn::RegisterFn};
 use steel_derive::Steel;
 
-use crate::rato::{self, LayoutNode, RatoUI};
+use crate::{
+    il::MemMap,
+    rato::{self, LayoutNode, RatoUI},
+};
 
 static DIBBUK_COMMAND: &'static str = "*dibbuk-command*";
 static DIBBUK_STATE: &'static str = "*dibbuk-state*";
@@ -24,9 +27,63 @@ pub enum TerminalRequest {
     Clear,
 }
 
+// impl MapRangeImpl for MapRange {
+//     fn size(&self) -> usize {
+//         self.range_end - self.range_start
+//     }
+//     fn start(&self) -> usize {
+//         self.range_start
+//     }
+//     fn filename(&self) -> Option<&Path> {
+//         self.pathname.as_deref()
+//     }
+//     fn is_exec(&self) -> bool {
+//         &self.flags[2..3] == "x"
+//     }
+//     fn is_write(&self) -> bool {
+//         &self.flags[1..2] == "w"
+//     }
+//     fn is_read(&self) -> bool {
+//         &self.flags[0..1] == "r"
+//     }
+// }
+
+#[derive(Debug, Clone, Steel)]
+pub struct MapRange {
+    pub range_start: usize,
+    pub range_end: usize,
+    pub offset: usize,
+    pub dev: String,
+    pub flags: String,
+    pub inode: usize,
+    pub pathname: Option<PathBuf>,
+}
+
+impl MapRange {
+    pub fn contains(&self, addr: u64) -> bool {
+        self.range_start <= (addr as usize) && self.range_end >= (addr as usize)
+    }
+}
+
 pub struct Builder {
     pub runtime_dir: String,
     log_vm: bool,
+}
+
+pub fn process_memory_mapping(pid: u64) -> Vec<MapRange> {
+    proc_maps::get_process_maps(pid as i32)
+        .unwrap()
+        .into_iter()
+        .map(|mp| MapRange {
+            range_start: mp.start(),
+            range_end: mp.start() + mp.size(),
+            offset: mp.offset,
+            dev: mp.dev.clone(),
+            flags: mp.flags.clone(),
+            inode: mp.inode,
+            pathname: mp.filename().map(|p| p.to_owned()),
+        })
+        .collect()
 }
 
 impl Builder {
@@ -55,6 +112,10 @@ impl Builder {
         vm.register_fn("TerminalClear", || {
             RuntimeRequest::Term(TerminalRequest::Clear)
         });
+
+        vm.register_type::<MapRange>("MapRange?");
+        vm.register_fn("ProcessMemoryMapping", process_memory_mapping);
+        vm.register_fn("MapRange->contains?", MapRange::contains);
 
         // vm.register_fn("Paragrah", Paragraph::new);
 
@@ -147,7 +208,7 @@ impl ScriptingRuntime {
                 println!("realoading state...");
                 self.reload_main_with_state(state);
                 println!("state reloaded!");
-                None
+                Some(TerminalRequest::Clear)
             }
             Ok(RuntimeRequest::Term(term)) => Some(term),
             Err(_) => {

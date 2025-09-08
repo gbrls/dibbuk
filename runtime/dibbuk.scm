@@ -80,6 +80,8 @@
 ; ===============
 ;
 
+(define (dibbuk/proc-maps pid)
+  (ProcessMemoryMapping pid))
 (define (dibbuk/cmd l) (GdbCommandsReq l))
 (define (dibbuk/none) (EmptyReq))
 (define (dibbuk/reload) (Reload))
@@ -106,7 +108,7 @@
   (list (hash-insert *dibbuk-state* k v) (dibbuk/none)))
 
 (define *dibbuk-command* (dibbuk/none))
-(define *dibbuk-state* (hash 'verbose #true))
+(define *dibbuk-state* (hash 'verbose #false))
 (define *rato-ui-str* (hash))
 
 (define (rato/tick? r) (TermTick? r))
@@ -383,7 +385,18 @@
             ((ExecAsync e)
               (if (string=? "stopped" (hash-ref e 'class))
                 (begin
-                  (dibbuk/cmd (list "-data-list-changed-registers")))
+                  (list
+                    (if (hash-get! state (list 'target 'pid) #:default #false)
+                      (->
+                        state
+                        ; maybe add a different place to log debug messages
+                        (dibbuk/push-history (string-append
+                                              "> PID "
+                                              (to-string (hash-get! state (list 'target 'pid)))
+                                              " stopped."))
+                        (hash-join! (list 'target) (hash 'maps (dibbuk/proc-maps (hash-get! state (list 'target 'pid))))))
+                      state)
+                    (dibbuk/cmd (list "-data-list-changed-registers"))))
                 (dibbuk/none)))
 
             ((StatusAsync e)
