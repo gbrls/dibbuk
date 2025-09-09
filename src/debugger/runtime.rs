@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 use color_eyre::owo_colors::OwoColorize;
 use ratatui::widgets::Paragraph;
-use steel::{SteelVal, steel_vm::register_fn::RegisterFn};
+use read_process_memory::ProcessHandle;
+use steel::{SteelVal, rvals::Custom, steel_vm::register_fn::RegisterFn};
 use steel_derive::Steel;
 
 use crate::{
@@ -48,7 +49,7 @@ pub enum TerminalRequest {
 //     }
 // }
 
-#[derive(Debug, Clone, Steel)]
+#[derive(Debug, Clone)]
 pub struct MapRange {
     pub range_start: usize,
     pub range_end: usize,
@@ -59,9 +60,19 @@ pub struct MapRange {
     pub pathname: Option<PathBuf>,
 }
 
+impl Custom for MapRange {
+    fn fmt(&self) -> Option<std::result::Result<String, std::fmt::Error>> {
+        Some(Ok(format!("{:?}", self)))
+    }
+}
+
 impl MapRange {
     pub fn contains(&self, addr: u64) -> bool {
         self.range_start <= (addr as usize) && self.range_end >= (addr as usize)
+    }
+
+    pub fn flags(&self) -> String {
+        self.flags.clone()
     }
 }
 
@@ -84,6 +95,27 @@ pub fn process_memory_mapping(pid: u64) -> Vec<MapRange> {
             pathname: mp.filename().map(|p| p.to_owned()),
         })
         .collect()
+}
+
+pub fn read_proc_mem(addr: usize, length: usize, pid: u64) -> Option<Vec<u8>> {
+    let handle = ProcessHandle::try_from(pid as i32).unwrap();
+    read_process_memory::copy_address(addr, length, &handle).ok()
+}
+
+pub fn str_to_int(s: String, base: u32) -> Option<u64> {
+    u64::from_str_radix(s.as_str(), base).ok()
+}
+
+pub fn int_to_hex(x: u64, leading: u64) -> String {
+    match leading {
+        2 => format!("{:02x}", x),
+        4 => format!("{:04x}", x),
+        8 => format!("{:08x}", x),
+        16 => format!("{:016x}", x),
+        32 => format!("{:032x}", x),
+        64 => format!("{:064x}", x),
+        _ => format!("{:x}", x),
+    }
 }
 
 impl Builder {
@@ -116,6 +148,10 @@ impl Builder {
         vm.register_type::<MapRange>("MapRange?");
         vm.register_fn("ProcessMemoryMapping", process_memory_mapping);
         vm.register_fn("MapRange->contains?", MapRange::contains);
+        vm.register_fn("MapRange->flags", MapRange::flags);
+        vm.register_fn("rust.radix-string->int", str_to_int);
+        vm.register_fn("rust.int->hex", int_to_hex);
+        vm.register_fn("ReadProcMem", read_proc_mem);
 
         // vm.register_fn("Paragrah", Paragraph::new);
 

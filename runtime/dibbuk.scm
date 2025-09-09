@@ -1,39 +1,3 @@
-; (require "~/")
-
-; {
-;   "widgets": [
-;     {
-;       "Paragraph": {
-;         "text": "Hello RATO!",
-;         "bordered": true
-;       }
-;     },
-;     {
-;       "List": [
-;         [
-;           "hi",
-;           "there"
-;         ],
-;         0
-;       ]
-;     }
-;   ],
-;   "layout": {
-;     "children": [
-;       {
-;         "children": [],
-;         "mode": "Single"
-;       },
-;       {
-;         "children": [],
-;         "mode": "Single"
-;       }
-;     ],
-;     "mode": "SplitV"
-;   }
-; }
-;
-
 (define (rato/layout children mode)
   (hash 'children children 'mode mode))
 
@@ -80,8 +44,15 @@
 ; ===============
 ;
 
+(define (dibbuk/addrmap-contains? mp addr)
+  (MapRange->contains? mp addr))
+(define (dibbuk/addrmap-flags mp)
+  (MapRange->flags mp))
 (define (dibbuk/proc-maps pid)
   (ProcessMemoryMapping pid))
+(define (dibbuk/read-mem pid addr len)
+  (ReadProcMem addr len pid))
+
 (define (dibbuk/cmd l) (GdbCommandsReq l))
 (define (dibbuk/none) (EmptyReq))
 (define (dibbuk/reload) (Reload))
@@ -104,6 +75,12 @@
     (#true
       (list state (dibbuk/none)))))
 
+(define (radix-string->int s base)
+  (rust.radix-string->int s base))
+
+(define (int->hex s #:leading [leading 2])
+  (rust.int->hex s leading))
+
 (define (state-insert k v)
   (list (hash-insert *dibbuk-state* k v) (dibbuk/none)))
 
@@ -113,6 +90,24 @@
 
 (define (rato/tick? r) (TermTick? r))
 (define (rato/clear) (TerminalClear))
+
+(define (addrmaps-filter-map state addr f)
+  (if (hash-get! state (list 'target 'maps) #:default #false)
+    (transduce
+      (hash-get! state (list 'target 'maps))
+      (filtering (lambda (mp) (dibbuk/addrmap-contains? mp addr)))
+      (mapping f)
+      (into-list))
+    (list)))
+
+(define (addr? state addr)
+  (not (empty? (addrmaps-filter-map state addr (lambda (x) x)))))
+
+(define (addr-perms state addr)
+  (let ((res (addrmaps-filter-map state addr (lambda (m) (dibbuk/addrmap-flags m)))))
+    (if (not (empty? res))
+      (first res)
+      "")))
 
 (define (dibbuk/handle-event state evt-str)
   (let ((result (handle-event state (string->jsexpr evt-str))))
@@ -280,7 +275,18 @@
       (hash-keys->list)
       (transduce (filtering (lambda (name) (hashset-contains? *debug-registers* name))) (into-list))
       (transduce (mapping (lambda (name)
-                           (string-append name " " (hash-ref (hash-ref state 'register-state) name))))
+                           (string-append
+                             name
+                             " "
+                             (int->hex (hash-get! state (list 'register-state name)) #:leading 16)
+
+                             ;
+                             (if
+                               (addr? state (hash-get! state (list 'register-state name)))
+                               (string-append "   " (addr-perms state (hash-get! state (list 'register-state name))))
+                               "")
+                             ;
+                             )))
         (into-list))
       ;
       )
@@ -291,6 +297,23 @@
     state
     (list 'ui 'registers)
     (hash 'widget (rato/list (debug-print-regs state)))))
+
+(define (ui/memory state)
+  (hash-join! state
+    (list 'ui 'memory)
+    (hash 'widget
+      (if (and
+           (hash-get! state (list 'register-state "rip") #:default #false)
+           (hash-get! state (list 'target 'pid) #:default #false))
+        (-> (dibbuk/read-mem
+             (hash-get! state (list 'target 'pid))
+             (hash-get! state (list 'register-state "rip"))
+             16)
+          (transduce (mapping (lambda (byte) (int->hex byte))) (into-list))
+          (to-string)
+          (list)
+          (rato/list))
+        (rato/list (list "nothing..."))))))
 
 ; TODO: add a title that says 13/37 when the focus is shifted up
 (define (ui/history state)
@@ -315,6 +338,7 @@
              (->
                state
                (ui/registers)
+               (ui/memory)
                (ui/history))))
 
     (list (hash-insert
@@ -328,16 +352,17 @@
            (rato/ui (list
                      (hash-get! updated-state (list 'ui 'history 'widget) #:default (rato/paragraph "...ops"))
                      (hash-get! updated-state (list 'ui 'registers 'widget) #:default (rato/paragraph "...ops"))
-                     (rato/list (list "a" "b" "c"))
+                     (hash-get! updated-state (list 'ui 'memory 'widget) #:default (rato/paragraph "...ops"))
                      (rato/paragraph "bottom")
                      ;
                      )
              (rato/layout
                (list
                  (rato/layout-single)
-                 (rato/layout
-                   (list (rato/layout-single)
-                     (rato/layout (list (rato/layout-single) (rato/layout-single)) 'SplitV))
+                 (rato/layout (list
+                               (rato/layout-single)
+                               (rato/layout-single)
+                               (rato/layout-single))
                    'SplitV))
                'SplitH)))
       (dibbuk/none))))
@@ -417,6 +442,7 @@
                           (fold (lambda (x acc) (hash-insert acc (first x) (second x))) (hash) pairs))
                         (dibbuk/none))))
 
+                  ; Handle reading the IDs of changes registers
                   ((changed-registers regs)
                     (letrec ((ids
                                (->
@@ -437,7 +463,13 @@
                                              (lambda (l)
                                                (list
                                                  (-> l (first) (second) (hash-ref 'Const) (string->int))
-                                                 (-> l (second) (second) (hash-ref 'Const)))))
+                                                 (->
+                                                   l
+                                                   (second)
+                                                   (second)
+                                                   (hash-ref 'Const)
+                                                   (trim-start-matches "0x")
+                                                   (radix-string->int 16)))))
                                    (into-list))))
                              (changed
                                (fold (lambda (x acc)
@@ -483,20 +515,20 @@
                       (list (->
                              state
                              (dibbuk/push-history (string-append "THREADS> " (to-string id)))
-                             (hash-join! (list 'target) (hash 'meta meta 'name name 'pid pid)))
+                             (hash-join! (list 'target) (hash 'meta meta 'name name 'pid pid))
+                             (hash-join! (list 'target) (hash 'maps (dibbuk/proc-maps pid))))
                         (dibbuk/none))))
 
                   (else result))))
             (else #false))))
 
-    (if (and
-         (hash-get! state (list 'verbose))
-         ; (not
-         ;   (and
-         ;     (hash? event)
-         ;     (string=? "Tick" (hash-get! event (list 'TerminalUpdate) #:default ""))))
-         ;
-         )
+    (if
+      (hash-get! state (list 'verbose))
+      ; (not
+      ;   (and
+      ;     (hash? event)
+      ;     (string=? "Tick" (hash-get! event (list 'TerminalUpdate) #:default ""))))
+      ;
       (->
         state
         (dibbuk/push-history "[debug] event:")

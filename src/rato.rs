@@ -22,6 +22,63 @@ pub const META: u8 = 0b0010_0000;
 pub const NONE: u8 = 0b0000_0000;
 
 #[derive(Debug, Clone, Steel, Facet)]
+#[repr(u8)]
+pub enum LayoutMode {
+    SplitH,
+    SplitV,
+    Floating,
+    Tab,
+    Single,
+}
+
+#[derive(Debug, Clone, Steel, Facet)]
+pub struct LayoutNode {
+    pub children: Vec<Box<LayoutNode>>,
+    pub mode: LayoutMode,
+}
+
+impl LayoutNode {
+    /// TODO: recursion isn't handled just YET
+    pub fn leafs(&self, rect: ratatui::prelude::Rect) -> Vec<ratatui::layout::Rect> {
+        use ratatui::prelude::Layout;
+
+        // base case
+        if self.children.len() == 0 {
+            return vec![rect];
+        }
+        // else: recursive case
+
+        let constraints = (0..self.children.len()).map(|_| Constraint::Min(2));
+
+        let l = Layout::default();
+        let rects = match self.mode {
+            LayoutMode::SplitH => l.direction(Direction::Horizontal),
+            LayoutMode::SplitV => l.direction(Direction::Vertical),
+            LayoutMode::Floating => todo!(),
+            LayoutMode::Tab => todo!(),
+            LayoutMode::Single => l,
+        }
+        .constraints(constraints)
+        .split(rect)
+        .to_vec();
+
+        let rects = rects
+            .iter()
+            .zip(self.children.iter())
+            .flat_map(|(rect, node)| node.leafs(*rect))
+            .collect();
+
+        rects
+    }
+}
+
+impl From<String> for LayoutNode {
+    fn from(value: String) -> Self {
+        self::from_str(value.as_str()).unwrap()
+    }
+}
+
+#[derive(Debug, Clone, Steel, Facet)]
 pub struct Paragraph {
     pub text: String,
     pub bordered: bool,
@@ -37,8 +94,60 @@ pub struct Block {
 pub enum Widget {
     Paragraph(Paragraph),
     Block(Block),
-    List(Vec<String>),
+    List(Vec<String>, usize, bool),
     Empty,
+}
+
+#[derive(Debug, Clone, Steel, Facet)]
+pub struct RatoUI {
+    pub widgets: Vec<Widget>,
+    pub layout: LayoutNode,
+}
+
+impl From<String> for RatoUI {
+    fn from(value: String) -> Self {
+        self::from_str(value.as_str()).unwrap()
+    }
+}
+
+impl Into<String> for RatoUI {
+    fn into(self) -> String {
+        self::to_string(&self)
+    }
+}
+
+impl Into<SteelVal> for RatoUI {
+    fn into(self) -> SteelVal {
+        let str: String = self.into();
+        SteelVal::StringV(str.into())
+    }
+}
+
+impl ratatui::prelude::Widget for &RatoUI {
+    fn render(self, area: Rect, buf: &mut Buffer)
+    where
+        Self: Sized,
+    {
+        let leaf_rect = self.layout.leafs(area);
+        for (i, w) in self.widgets.iter().enumerate() {
+            if w.is_stateful() {
+                ratatui::prelude::StatefulWidget::render(w, leaf_rect[i], buf, &mut 0);
+            } else {
+                ratatui::prelude::Widget::render(w, leaf_rect[i], buf);
+            }
+        }
+    }
+}
+
+impl Widget {
+    pub fn is_stateful(&self) -> bool {
+        match self {
+            Widget::Paragraph(_) => false,
+            Widget::Block(_) => false,
+            Widget::List(_, _, _) => true,
+            Widget::Empty => false,
+        }
+    }
 }
 
 impl Into<String> for Widget {
@@ -81,12 +190,41 @@ impl ratatui::prelude::Widget for &Widget {
                     ratatui::widgets::Paragraph::new("empty! klum!").style(Style::default().red());
                 p.render(area, buf);
             }
-            Widget::List(l) => {
+            Widget::List(l, _, _) => {
                 let l = l.iter().map(|s| s.as_str());
                 let p = ratatui::widgets::List::new(l);
                 ratatui::widgets::Widget::render(p, area, buf);
                 //
             }
+        }
+    }
+}
+
+impl ratatui::prelude::StatefulWidget for &Widget {
+    type State = u64;
+
+    fn render(self, area: Rect, buf: &mut Buffer, _state: &mut Self::State) {
+        if !self.is_stateful() {
+            panic!(
+                "widget {:?} is not stateful, trying to render as stateful widget",
+                self
+            );
+        }
+
+        match self {
+            Widget::List(items, focus, bordered) => {
+                let l = items.iter().map(|s| s.as_str());
+                let p = ratatui::widgets::List::new(l).highlight_style(Style::default());
+                let p = if *bordered {
+                    p.block(ratatui::widgets::Block::bordered())
+                } else {
+                    p
+                };
+
+                let mut state = ratatui::widgets::ListState::default().with_selected(Some(*focus));
+                ratatui::widgets::StatefulWidget::render(p, area, buf, &mut state);
+            }
+            _ => {}
         }
     }
 }
@@ -258,6 +396,11 @@ mod tests {
         println!("{:#?}", s);
     }
 
+    fn print_ui_serialized(w: RatoUI) {
+        let s: String = w.into();
+        println!("{:#?}", s);
+    }
+
     #[test]
     fn serialize_widget() {
         let p = Paragraph {
@@ -266,6 +409,35 @@ mod tests {
         };
 
         print_serialized(Widget::Paragraph(p));
-        print_serialized(Widget::List(vec!["hi".into(), "there".into()]));
+        print_serialized(Widget::List(vec!["hi".into(), "there".into()], 0, false));
+    }
+
+    #[test]
+    fn serialize_rato_ui() {
+        let p = Paragraph {
+            text: "Hello RATO!".into(),
+            bordered: true,
+        };
+        let p = Widget::Paragraph(p);
+        let l = Widget::List(vec!["hi".into(), "there".into()], 0, false);
+
+        let ui = RatoUI {
+            widgets: vec![p, l],
+            layout: LayoutNode {
+                children: vec![
+                    Box::new(LayoutNode {
+                        children: vec![],
+                        mode: LayoutMode::Single,
+                    }),
+                    Box::new(LayoutNode {
+                        children: vec![],
+                        mode: LayoutMode::Single,
+                    }),
+                ],
+                mode: LayoutMode::SplitV,
+            },
+        };
+
+        print_ui_serialized(ui);
     }
 }
