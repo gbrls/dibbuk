@@ -152,7 +152,7 @@ impl App<CrosstermBackend<io::Stdout>> {
                 let ui = self.runtime.extract_rato_ui();
                 // println!("UI {:?}", ui);
                 let area = frame.area().inner(ratatui::layout::Margin {
-                    horizontal: 10,
+                    horizontal: 0,
                     vertical: 0,
                 });
                 if ui.is_some() {

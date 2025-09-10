@@ -302,7 +302,7 @@
     ))
 
 ; (define *debug-registers* (hashset "rip"))
-(define *debug-registers* (hashset "rax" "rbx" "rdi" "rbp" "rsp" "rdx" "rsi" "rip"))
+(define *debug-registers* (hashset "rax" "rbx" "rcx" "rdx" "rdi" "rsi" "rbp" "rsp" "rip" "r8" "r9" "r10" "r11" "r12"))
 
 (define (debug-print-regs state)
   (if (hash-contains? state 'register-state)
@@ -384,8 +384,8 @@
                          (list->sort)
                          (transduce (mapping (lambda (off) (string-append
                                                             ; "rip "
-                                                            ; (to-string off)
-                                                            ; " "
+                                                            (int->hex (+ rip off) #:leading 16)
+                                                            " "
                                                             (to-string (hash-ref disasm (+ off rip))))))
                            (into-list)))
                        ;
@@ -402,13 +402,14 @@
         (->
           (range 16)
 
-          (transduce (mapping (lambda (i) (->
-                                           (dibbuk/read-mem pid (+ ptr (* i 16)) 16)
-
-                                           (transduce (mapping (lambda (byte) (int->hex byte))) (into-list))
-                                           (string-join "")
-                                           ;
-                                           )))
+          (transduce (mapping (lambda (i) (string-append (int->hex (+ ptr (* i 8)) #:leading 16)
+                                           " "
+                                           (->
+                                             (dibbuk/read-mem pid (+ ptr (* i 8)) 8)
+                                             (transduce (mapping (lambda (byte) (int->hex byte))) (into-list))
+                                             (string-join "")
+                                             ;
+                                             ))))
             (into-list))
           (rato/list))
         (else (rato/list (list "nothing...")))))))
@@ -427,10 +428,6 @@
       (hash 'widget (rato/list hist-list #:focused (hash-get! state (list 'ui 'history 'focus) #:default (length hist-list)))))))
 
 (define (draw-ui state)
-  ; (rato/clear)
-  ; (debug-print-regs state)
-  ; (displayln "\rHi")
-  ;
   (letrec ((current-widget (hash-get! state (list 'ui 'current-widget) #:default 'history))
            (updated-state
              (->
@@ -443,18 +440,11 @@
     (list (hash-insert
            updated-state
            'rato-ui
-           ; (hash-get!
-           ;   updated-state
-           ;   (list 'ui current-widget 'widget)
-           ;   #:default
-           ;   (rato/paragraph "loading..."))
            (rato/ui (list
                      (hash-get! updated-state (list 'ui 'history 'widget) #:default (rato/paragraph "...ops"))
                      (hash-get! updated-state (list 'ui 'registers 'widget) #:default (rato/paragraph "...ops"))
                      (hash-get! updated-state (list 'ui 'disasm 'widget) #:default (rato/paragraph "...ops"))
-                     (hash-get! updated-state (list 'ui 'memory 'widget) #:default (rato/paragraph "...ops"))
-                     ;
-                     )
+                     (hash-get! updated-state (list 'ui 'memory 'widget) #:default (rato/paragraph "...ops")))
              (rato/layout
                (list
                  (rato/layout-single)

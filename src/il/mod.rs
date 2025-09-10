@@ -32,7 +32,7 @@ pub enum DisassemblyEngine {
     CS,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Facet, Steel)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Facet)]
 pub struct Disassembly {
     pub source: DisassemblyEngine,
     pub str: String,
@@ -41,6 +41,16 @@ pub struct Disassembly {
     pub mnemonic: Option<String>,
     pub offset: usize,
     pub addr: usize,
+}
+
+impl steel::rvals::Custom for Disassembly {
+    fn fmt(&self) -> Option<std::result::Result<String, std::fmt::Error>> {
+        Some(Ok(format!(
+            "{} {}",
+            self.mnemonic.clone().unwrap_or("".into()),
+            self.str.clone(),
+        )))
+    }
 }
 
 #[derive(Debug, Clone)]
