@@ -398,11 +398,18 @@
     (hash 'widget
       (with-state state
         ((pid ('target 'pid))
-          (rip ('register-state "rip")))
-        (-> (dibbuk/read-mem pid rip 16)
-          (transduce (mapping (lambda (byte) (int->hex byte))) (into-list))
-          (to-string)
-          (list)
+          (ptr ('register-state "rsp")))
+        (->
+          (range 16)
+
+          (transduce (mapping (lambda (i) (->
+                                           (dibbuk/read-mem pid (+ ptr (* i 16)) 16)
+
+                                           (transduce (mapping (lambda (byte) (int->hex byte))) (into-list))
+                                           (string-join "")
+                                           ;
+                                           )))
+            (into-list))
           (rato/list))
         (else (rato/list (list "nothing...")))))))
 
