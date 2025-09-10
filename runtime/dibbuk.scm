@@ -39,17 +39,41 @@
         ...
         (#true else-body ...)))))
 
+(define-syntax with-state
+  (syntax-rules (else)
+    ;; Base case: no bindings
+    ((_ state () body (else else-body))
+      (if #t body else-body))
+
+    ;; General case
+    ((_ state ((var (keys ...)) ...) body (else else-body))
+      (if (and (hash-get! state (list keys ...) #:default #false) ...)
+        (let ((var (hash-get! state (list keys ...))) ...)
+          body)
+        else-body))))
+
 ; ===============
 ; Aliases for Rust-defined  functions
 ; ===============
+;:(addrmaps-filter-map *dibbuk-state* (hash-get! *dibbuk-state* (list 'register-state "rip")) (lambda (x) x))
 ;
+
+; (DisasmMapRange pid 0)))
+(define (dibbuk/disasm-map mp pid offset)
+  (DisasmMapRange mp pid offset))
+
+(define (dibbuk/disasm-at mp pid addr)
+  (DisasmMapRangeOffset addr mp pid))
 
 (define (dibbuk/addrmap-contains? mp addr)
   (MapRange->contains? mp addr))
+
 (define (dibbuk/addrmap-flags mp)
   (MapRange->flags mp))
+
 (define (dibbuk/proc-maps pid)
   (ProcessMemoryMapping pid))
+
 (define (dibbuk/read-mem pid addr len)
   (ReadProcMem addr len pid))
 
@@ -74,6 +98,9 @@
       (list state result))
     (#true
       (list state (dibbuk/none)))))
+
+(define (list->sort l)
+  (rust.list->sort l))
 
 (define (radix-string->int s base)
   (rust.radix-string->int s base))
@@ -130,23 +157,34 @@
       (hash-join! (list 'ui 'history) (hash 'focus (+ 1 (length history)))))))
 
 (define (eval-user-command state str)
-  (if (starts-with? str ":")
-    (let ((expr-result (->
-                        str
-                        (trim-start-matches ":")
-                        (eval-string))))
-      ; (displayln "=>" expr-result)
-      (if (dibbuk/next? expr-result)
-        expr-result
-        (list
-          (-> state
-            (dibbuk/push-history (string-append "user> " str))
-            (dibbuk/push-history (string-append "=> " (to-string expr-result))))
-          (dibbuk/none))))
+  (cond
+    ; Direct Steel command
+    ((starts-with? str ":")
+      (let ((expr-result (->
+                          str
+                          (trim-start-matches ":")
+                          (eval-string))))
+        ; (displayln "=>" expr-result)
+        (if (dibbuk/next? expr-result)
+          expr-result
+          (list
+            (-> state
+              (dibbuk/push-history (string-append "user> " str))
+              (dibbuk/push-history (string-append
+                                    "=> "
+                                    (if (> (string-length (to-string expr-result)) (* 1024 1))
+                                      (string-append (substring (to-string expr-result) 0 (* 1024 1)) "\n... (too big)")
+                                      (to-string expr-result)))))
+            (dibbuk/none)))))
+
+    ((hash-get! state (list 'custom-commands))
+      (let ((cmd (first (split-whitespace str))))
+        state))
+
     ; just send to gdb instead
-    (list
-      (dibbuk/push-history state (string-append "user> " str))
-      (dibbuk/cmd (list str)))))
+    (#true (list
+            (dibbuk/push-history state (string-append "user> " str))
+            (dibbuk/cmd (list str))))))
 
 (define (state-update state key value)
   (letrec ((old-substate (if (hash-contains? state key)
@@ -155,7 +193,7 @@
            (new-substate (hash-union value old-substate)))
     (hash-insert state key new-substate)))
 
-(define (hash-get! h keys #:default [default void])
+(define (hash-get! h keys #:default [default #false])
   (cond
     ((empty? keys) h)
     ((= 1 (length keys))
@@ -298,22 +336,75 @@
     (list 'ui 'registers)
     (hash 'widget (rato/list (debug-print-regs state)))))
 
+(define (disasm-ip-segment state)
+  (with-state state ((rip ('register-state "rip"))
+                     (pid ('target 'pid)))
+    (hash-union
+      (->
+        state
+        (addrmaps-filter-map rip (lambda (x) x))
+        (first)
+        (dibbuk/disasm-at pid rip))
+      ; (hash)
+
+      (->
+        state
+        (addrmaps-filter-map rip (lambda (x) x))
+        (first)
+        (dibbuk/disasm-map pid 0)))
+    (else (hash))))
+
+(define (show-ip-segment state)
+  (with-state state ((rip ('register-state "rip"))
+                     (pid ('target 'pid)))
+    (->
+      state
+      (addrmaps-filter-map rip (lambda (x) x))
+      (first))
+    (else (hash))))
+
+(define (ui/disasm state)
+  (with-state state ((rip ('register-state "rip")))
+    (letrec ((disasm (disasm-ip-segment state)))
+      (hash-join! state (list 'ui 'disasm)
+        (hash 'widget (rato/list
+                       (->
+                         disasm
+                         (hash-keys->list)
+                         (transduce (mapping (lambda (addr) (- addr rip))) (into-list))
+                         ; TODO: FIX: ERROR: on different segments address get mapped wrong for some reason
+                         (transduce
+                           (filtering
+                             (lambda (diff) (and
+                                             ; (>= (+ diff 32) 0)
+                                             (>= diff 0)
+                                             ;
+                                             (< diff 64))))
+                           (into-list))
+                         (list->sort)
+                         (transduce (mapping (lambda (off) (string-append
+                                                            ; "rip "
+                                                            ; (to-string off)
+                                                            ; " "
+                                                            (to-string (hash-ref disasm (+ off rip))))))
+                           (into-list)))
+                       ;
+                       ))))
+    (else state)))
+
 (define (ui/memory state)
   (hash-join! state
     (list 'ui 'memory)
     (hash 'widget
-      (if (and
-           (hash-get! state (list 'register-state "rip") #:default #false)
-           (hash-get! state (list 'target 'pid) #:default #false))
-        (-> (dibbuk/read-mem
-             (hash-get! state (list 'target 'pid))
-             (hash-get! state (list 'register-state "rip"))
-             16)
+      (with-state state
+        ((pid ('target 'pid))
+          (rip ('register-state "rip")))
+        (-> (dibbuk/read-mem pid rip 16)
           (transduce (mapping (lambda (byte) (int->hex byte))) (into-list))
           (to-string)
           (list)
           (rato/list))
-        (rato/list (list "nothing..."))))))
+        (else (rato/list (list "nothing...")))))))
 
 ; TODO: add a title that says 13/37 when the focus is shifted up
 (define (ui/history state)
@@ -339,6 +430,7 @@
                state
                (ui/registers)
                (ui/memory)
+               (ui/disasm)
                (ui/history))))
 
     (list (hash-insert
@@ -352,8 +444,8 @@
            (rato/ui (list
                      (hash-get! updated-state (list 'ui 'history 'widget) #:default (rato/paragraph "...ops"))
                      (hash-get! updated-state (list 'ui 'registers 'widget) #:default (rato/paragraph "...ops"))
+                     (hash-get! updated-state (list 'ui 'disasm 'widget) #:default (rato/paragraph "...ops"))
                      (hash-get! updated-state (list 'ui 'memory 'widget) #:default (rato/paragraph "...ops"))
-                     (rato/paragraph "bottom")
                      ;
                      )
              (rato/layout

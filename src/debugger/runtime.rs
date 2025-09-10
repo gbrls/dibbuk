@@ -7,6 +7,7 @@ use steel::{SteelVal, rvals::Custom, steel_vm::register_fn::RegisterFn};
 use steel_derive::Steel;
 
 use crate::{
+    capstone_disassembly,
     il::MemMap,
     rato::{self, LayoutNode, RatoUI},
 };
@@ -62,7 +63,10 @@ pub struct MapRange {
 
 impl Custom for MapRange {
     fn fmt(&self) -> Option<std::result::Result<String, std::fmt::Error>> {
-        Some(Ok(format!("{:?}", self)))
+        Some(Ok(format!(
+            "MapRange < start: {:016x} end: {:016x} offset: {:016x} >",
+            self.range_start, self.range_end, self.offset
+        )))
     }
 }
 
@@ -73,6 +77,25 @@ impl MapRange {
 
     pub fn flags(&self) -> String {
         self.flags.clone()
+    }
+
+    pub fn size(&self) -> usize {
+        self.range_end - self.range_start
+    }
+    pub fn start(&self) -> usize {
+        self.range_start
+    }
+    pub fn filename(&self) -> Option<&std::path::Path> {
+        self.pathname.as_deref()
+    }
+    pub fn is_exec(&self) -> bool {
+        &self.flags[2..3] == "x"
+    }
+    pub fn is_write(&self) -> bool {
+        &self.flags[1..2] == "w"
+    }
+    pub fn is_read(&self) -> bool {
+        &self.flags[0..1] == "r"
     }
 }
 
@@ -104,6 +127,11 @@ pub fn read_proc_mem(addr: usize, length: usize, pid: u64) -> Option<Vec<u8>> {
 
 pub fn str_to_int(s: String, base: u32) -> Option<u64> {
     u64::from_str_radix(s.as_str(), base).ok()
+}
+
+pub fn sort(mut xs: Vec<u64>) -> Vec<u64> {
+    xs.sort();
+    xs.clone()
 }
 
 pub fn int_to_hex(x: u64, leading: u64) -> String {
@@ -152,6 +180,9 @@ impl Builder {
         vm.register_fn("rust.radix-string->int", str_to_int);
         vm.register_fn("rust.int->hex", int_to_hex);
         vm.register_fn("ReadProcMem", read_proc_mem);
+        vm.register_fn("DisasmMapRange", capstone_disassembly::disasm_in_map);
+        vm.register_fn("DisasmMapRangeOffset", capstone_disassembly::read_at);
+        vm.register_fn("rust.list->sort", sort);
 
         // vm.register_fn("Paragrah", Paragraph::new);
 
@@ -170,6 +201,7 @@ impl Builder {
         // );
 
         let program = std::fs::read_to_string(dibbuk_main_path.as_path());
+        // FIXME: remove this unwrap
         vm.run(program.unwrap()).unwrap();
         vm.update_value(
             RATO_UI,
