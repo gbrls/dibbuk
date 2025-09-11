@@ -64,8 +64,15 @@ pub struct MapRange {
 impl Custom for MapRange {
     fn fmt(&self) -> Option<std::result::Result<String, std::fmt::Error>> {
         Some(Ok(format!(
-            "MapRange < start: {:016x} end: {:016x} offset: {:016x} >",
-            self.range_start, self.range_end, self.offset
+            "\n{}\nfro: {:016x}\nend: {:016x}\noff: {:x}\n\n",
+            self.pathname
+                .clone()
+                .unwrap_or(PathBuf::new())
+                .to_str()
+                .unwrap(),
+            self.range_start,
+            self.range_end,
+            self.offset
         )))
     }
 }
@@ -192,6 +199,7 @@ impl Builder {
             println!("DIR {dir:?} does not exist");
         }
 
+        vm.add_search_directory(dir.clone());
         let mut dibbuk_main_path = dir.clone();
         dibbuk_main_path.push("dibbuk.scm");
 

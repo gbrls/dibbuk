@@ -1,31 +1,5 @@
-(define (rato/layout children mode)
-  (hash 'children children 'mode mode))
-
-(define (rato/layout-single)
-  (rato/layout (list) 'Single))
-
-(define (rato/layout-horizontal-2)
-  (rato/layout
-    (list
-      (rato/layout-single)
-      (rato/layout-single))
-    'SplitH))
-
-(define (rato/layout-vertical-2)
-  (rato/layout
-    (list
-      (rato/layout-single)
-      (rato/layout-single))
-    'SplitV))
-
-(define (rato/ui widgets layout)
-  (hash 'widgets widgets 'layout layout))
-
-(define (rato/paragraph text)
-  (hash 'Paragraph (hash 'bordered #true 'text text)))
-
-(define (rato/list items #:focused [focused 0] #:bordered [bordered #true])
-  (hash 'List (list items focused bordered)))
+(require "rato.scm")
+(require "dibbuk-lib.scm")
 
 (define-syntax event-case
   (syntax-rules ()
@@ -51,147 +25,6 @@
         (let ((var (hash-get! state (list keys ...))) ...)
           body)
         else-body))))
-
-; ===============
-; Aliases for Rust-defined  functions
-; ===============
-;:(addrmaps-filter-map *dibbuk-state* (hash-get! *dibbuk-state* (list 'register-state "rip")) (lambda (x) x))
-;
-
-; (DisasmMapRange pid 0)))
-(define (dibbuk/disasm-map mp pid offset)
-  (DisasmMapRange mp pid offset))
-
-(define (dibbuk/disasm-at mp pid addr)
-  (DisasmMapRangeOffset addr mp pid))
-
-(define (dibbuk/addrmap-contains? mp addr)
-  (MapRange->contains? mp addr))
-
-(define (dibbuk/addrmap-flags mp)
-  (MapRange->flags mp))
-
-(define (dibbuk/proc-maps pid)
-  (ProcessMemoryMapping pid))
-
-(define (dibbuk/read-mem pid addr len)
-  (ReadProcMem addr len pid))
-
-(define (dibbuk/cmd l) (GdbCommandsReq l))
-(define (dibbuk/none) (EmptyReq))
-(define (dibbuk/reload) (Reload))
-(define (dibbuk/req? r) (Request? r))
-(define (dibbuk/state-and-command? result)
-  (and
-    (list? result)
-    (hash? (first result))
-    (dibbuk/req? (second result))))
-
-(define (dibbuk/next? result)
-  (or (dibbuk/state-and-command? result)
-    (dibbuk/req? result)))
-
-(define (dibbuk/make-next state result)
-  (cond
-    ((dibbuk/state-and-command? result) result)
-    ((dibbuk/req? result)
-      (list state result))
-    (#true
-      (list state (dibbuk/none)))))
-
-(define (list->sort l)
-  (rust.list->sort l))
-
-(define (radix-string->int s base)
-  (rust.radix-string->int s base))
-
-(define (int->hex s #:leading [leading 2])
-  (rust.int->hex s leading))
-
-(define (state-insert k v)
-  (list (hash-insert *dibbuk-state* k v) (dibbuk/none)))
-
-(define *dibbuk-command* (dibbuk/none))
-(define *dibbuk-state* (hash 'verbose #false))
-(define *rato-ui-str* (hash))
-
-(define (rato/tick? r) (TermTick? r))
-(define (rato/clear) (TerminalClear))
-
-(define (addrmaps-filter-map state addr f)
-  (if (hash-get! state (list 'target 'maps) #:default #false)
-    (transduce
-      (hash-get! state (list 'target 'maps))
-      (filtering (lambda (mp) (dibbuk/addrmap-contains? mp addr)))
-      (mapping f)
-      (into-list))
-    (list)))
-
-(define (addr? state addr)
-  (not (empty? (addrmaps-filter-map state addr (lambda (x) x)))))
-
-(define (addr-perms state addr)
-  (let ((res (addrmaps-filter-map state addr (lambda (m) (dibbuk/addrmap-flags m)))))
-    (if (not (empty? res))
-      (first res)
-      "")))
-
-(define (dibbuk/handle-event state evt-str)
-  (let ((result (handle-event state (string->jsexpr evt-str))))
-    (set! *dibbuk-state* (first result))
-    (set! *dibbuk-command* (second result))
-    (if (hash-contains? *dibbuk-state* 'rato-ui)
-      (set! *rato-ui-str* (value->jsexpr-string (hash-ref *dibbuk-state* 'rato-ui))))))
-
-(define (dibbuk/hello)
-  (set! *dibbuk-command* (dibbuk/cmd (list "a" "b"))))
-
-(define (dibbuk/push-history state str)
-  (letrec ((history (hash-get! state (list 'ui 'command-history) #:default (list))))
-    (-> state
-      (hash-join!
-        (list 'ui)
-        (hash
-          'command-history
-          (append history (list str))))
-      (hash-join! (list 'ui 'history) (hash 'focus (+ 1 (length history)))))))
-
-(define (eval-user-command state str)
-  (cond
-    ; Direct Steel command
-    ((starts-with? str ":")
-      (let ((expr-result (->
-                          str
-                          (trim-start-matches ":")
-                          (eval-string))))
-        ; (displayln "=>" expr-result)
-        (if (dibbuk/next? expr-result)
-          expr-result
-          (list
-            (-> state
-              (dibbuk/push-history (string-append "user> " str))
-              (dibbuk/push-history (string-append
-                                    "=> "
-                                    (if (> (string-length (to-string expr-result)) (* 1024 1))
-                                      (string-append (substring (to-string expr-result) 0 (* 1024 1)) "\n... (too big)")
-                                      (to-string expr-result)))))
-            (dibbuk/none)))))
-
-    ((hash-get! state (list 'custom-commands))
-      (let ((cmd (first (split-whitespace str))))
-        state))
-
-    ; just send to gdb instead
-    (#true (list
-            (dibbuk/push-history state (string-append "user> " str))
-            (dibbuk/cmd (list str))))))
-
-(define (state-update state key value)
-  (letrec ((old-substate (if (hash-contains? state key)
-                          (hash-ref state key)
-                          (hash)))
-           (new-substate (hash-union value old-substate)))
-    (hash-insert state key new-substate)))
 
 (define (hash-get! h keys #:default [default #false])
   (cond
@@ -221,9 +54,116 @@
                               (hash-ref h k)
                               (hash)))
                (new-substate (hash-join! old-substate (cdr keys) value)))
-        (hash-insert h k new-substate)))
-    ;
-    ))
+        (hash-insert h k new-substate)))))
+
+(define (list->sort l)
+  (rust.list->sort l))
+
+(define (radix-string->int s base)
+  (rust.radix-string->int s base))
+
+(define (int->hex s #:leading [leading 2])
+  (rust.int->hex s leading))
+
+(define (addrmaps-filter-map state addr f)
+  (if (hash-get! state (list 'target 'maps) #:default #false)
+    (transduce
+      (hash-get! state (list 'target 'maps))
+      (filtering (lambda (mp) (dibbuk/addrmap-contains? mp addr)))
+      (mapping f)
+      (into-list))
+    (list)))
+
+(define (addr? state addr)
+  (not (empty? (addrmaps-filter-map state addr (lambda (x) x)))))
+
+(define (addr-perms state addr)
+  (let ((res (addrmaps-filter-map state addr (lambda (m) (dibbuk/addrmap-flags m)))))
+    (if (not (empty? res))
+      (first res)
+      "")))
+
+(define (ui/push-history state str)
+  (letrec ((history (hash-get! state (list 'ui 'command-history) #:default (list))))
+    (-> state
+      (hash-join!
+        (list 'ui)
+        (hash
+          'command-history
+          (append history (list str))))
+      (hash-join! (list 'ui 'history) (hash 'focus (+ 1 (length history)))))))
+
+(define (ui/push-command state name f)
+  (hash-join! state (list 'ui 'commands) (hash name f)))
+
+(define *dibbuk-command* (dibbuk/none))
+(define *dibbuk-state* (->
+                        (hash 'verbose #false)
+                        (ui/push-history "===> [welcome to DIBBUK] <===\n~~~ a gdb tui possessed by a lispy spirit ~~~\n\n")
+                        (ui/push-command "echo"
+                          (lambda (state str) (ui/push-history state (string-join str " "))))
+
+                        (ui/push-command "vmmap"
+                          (lambda (state str)
+                            (ui/push-history state (to-string
+                                                    (if (and (> (length str) 0) (hash-get! state (list 'register-state (first str))))
+                                                      (addrmaps-filter-map state (hash-get! state (list 'register-state (first str))) (lambda (x) x))
+                                                      (hash-get! state (list 'target 'maps) #:default "Target process not loaded yet!"))))))
+                        ;
+                        ))
+(define *rato-ui-str* (hash))
+
+(define (state-insert k v)
+  (list (hash-insert *dibbuk-state* k v) (dibbuk/none)))
+
+(define (dibbuk/handle-event state evt-str)
+  (let ((result (handle-event state (string->jsexpr evt-str))))
+    (set! *dibbuk-state* (first result))
+    (set! *dibbuk-command* (second result))
+    (if (hash-contains? *dibbuk-state* 'rato-ui)
+      (set! *rato-ui-str* (value->jsexpr-string (hash-ref *dibbuk-state* 'rato-ui))))))
+
+(define (eval-user-command state str)
+  (cond
+    ; Direct Steel command
+    ((starts-with? str ":")
+      (let ((expr-result (->
+                          str
+                          (trim-start-matches ":")
+                          (eval-string))))
+        ; (displayln "=>" expr-result)
+        (if (dibbuk/next? expr-result)
+          expr-result
+          (list
+            (-> state
+              (ui/push-history (string-append "user> " str))
+              (ui/push-history (string-append
+                                "=> "
+                                (if (> (string-length (to-string expr-result)) (* 1024 1))
+                                  (string-append (substring (to-string expr-result) 0 (* 1024 1)) "\n... (too big)")
+                                  (to-string expr-result)))))
+            (dibbuk/none)))))
+
+    ((hash-get! state (list 'ui 'commands (first (split-whitespace str))))
+      (letrec ((cmd (first (split-whitespace str)))
+               (f (hash-get! state (list 'ui 'commands cmd))))
+        (list (f (->
+                  state
+                  (ui/push-history (string-append "user> " str)))
+               (rest (split-whitespace str)))
+          (dibbuk/none))))
+
+    ; just send to gdb instead
+    (#true (list
+            (ui/push-history state (string-append "user> " str))
+            (dibbuk/cmd (list str))))))
+
+(define (state-update state key value)
+  (letrec ((old-substate (if (hash-contains? state key)
+                          (hash-ref state key)
+                          (hash)))
+           (new-substate (hash-union value old-substate)))
+    (hash-insert state key new-substate)))
 
 (define (handle-tab state)
   (letrec ((current
@@ -385,7 +325,7 @@
                          (transduce (mapping (lambda (off) (string-append
                                                             ; "rip "
                                                             (int->hex (+ rip off) #:leading 16)
-                                                            " "
+                                                            "| "
                                                             (to-string (hash-ref disasm (+ off rip))))))
                            (into-list)))
                        ;
@@ -400,14 +340,14 @@
         ((pid ('target 'pid))
           (ptr ('register-state "rsp")))
         (->
-          (range 16)
+          (range 32)
 
           (transduce (mapping (lambda (i) (string-append (int->hex (+ ptr (* i 8)) #:leading 16)
-                                           " "
+                                           "| "
                                            (->
                                              (dibbuk/read-mem pid (+ ptr (* i 8)) 8)
                                              (transduce (mapping (lambda (byte) (int->hex byte))) (into-list))
-                                             (string-join "")
+                                             (string-join " ")
                                              ;
                                              ))))
             (into-list))
@@ -470,14 +410,14 @@
 
             ((ConsoleStream s)
               (list
-                (dibbuk/push-history state (to-string s))
+                (ui/push-history state (to-string s))
                 (dibbuk/none)))
 
             ((LogStream s)
               ; Not sure what the semantics of a LogStream are on GDB MI, but it returns the user input here, so I'm doing nothing with it to not repeat the user input
               ; (displayln (trim-end-matches s "\n"))
               (list
-                (dibbuk/push-history state s)
+                (ui/push-history state s)
                 (dibbuk/none)))
 
             ((UserInput s)
@@ -504,10 +444,10 @@
                       (->
                         state
                         ; maybe add a different place to log debug messages
-                        (dibbuk/push-history (string-append
-                                              "> PID "
-                                              (to-string (hash-get! state (list 'target 'pid)))
-                                              " stopped."))
+                        (ui/push-history (string-append
+                                          "> PID "
+                                          (to-string (hash-get! state (list 'target 'pid)))
+                                          " stopped."))
                         (hash-join! (list 'target) (hash 'maps (dibbuk/proc-maps (hash-get! state (list 'target 'pid))))))
                       state)
                     (dibbuk/cmd (list "-data-list-changed-registers"))))
@@ -603,7 +543,7 @@
                              )
                       (list (->
                              state
-                             (dibbuk/push-history (string-append "THREADS> " (to-string id)))
+                             (ui/push-history (string-append "THREADS> " (to-string id)))
                              (hash-join! (list 'target) (hash 'meta meta 'name name 'pid pid))
                              (hash-join! (list 'target) (hash 'maps (dibbuk/proc-maps pid))))
                         (dibbuk/none))))
@@ -620,10 +560,10 @@
       ;
       (->
         state
-        (dibbuk/push-history "[debug] event:")
-        (dibbuk/push-history (to-string event))
-        (dibbuk/push-history "[debug] result:")
-        (dibbuk/push-history (to-string result))
+        (ui/push-history "[debug] event:")
+        (ui/push-history (to-string event))
+        (ui/push-history "[debug] result:")
+        (ui/push-history (to-string result))
         (dibbuk/make-next result))
 
       (dibbuk/make-next state result))))
