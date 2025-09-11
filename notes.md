@@ -1,3 +1,5 @@
+- Those are my personal notes when developing dibbuk, they are messy, I know, this is not documentation or anything, just a work log.
+
 - implement dibbuk as: 
   - a rust library to interact with binaries, using:
     - gdb
@@ -152,3 +154,70 @@ I also think that during my vacations I should measure well the time that is spe
 I think this follows a good order of priority.
 
 Also, a TRUE TUI that works well for exploit development is just not much to ask, I don't like text moving all over the place, too many things changing without any semantic meaning. If there's some change in the syntax (ui), after some iteration, it should be caused by some semantic change on debugged program, it's just how my brain is wired, doesn't matter if looking at that bright light is not good for my eyes, it's just too tempting to not keep looking at that shiny, bright and blinking thing; I know quite a few people that relate to this.
+
+
+# 02/09
+
+- Maybe use facet to automatically write generators for Rust types to steel code
+
+
+# 06/09
+
+- priorities list, updated:
+  - ⚒️ read thread info ok
+  - ⚒️ integrate scheme with native functionality to read memmory, memory maps and disassembly from capstone ok
+  - 🔬 add a conveninet way to users to extend the ui from scheme (in progress)
+  - 🎨 replicate all ui functionality from the older rust-only version
+  - add conveninent way to extend gdb commands with builtin stuff from scheme
+  - I need to implement proper displaying of strings with \t and \n's coming from gdb 
+  - add conveninent way to add callback functions to (before or after) especific events so that users can extend the funcionality easily from the repl or scripitng
+  - 🔬 there's some busy waiting going on, I need to figure out where...
+  - 🎨 highlight changed registers
+  - 🎨 add colours, titles, and overlapping borders
+  - 🎨 tachyonfx animations
+  - replicate most of the core ui functionality from pwndbg
+
+
+# 08/09
+
+
+- DONE ⚒️ integrate scheme with native functionality to read memmory, memory maps and disassembly from capstone
+  - just disassembly is missing as of today
+
+- I should use a macro for this pattern of reading a path from the map, and doing something if it exists, it should create a binding, like
+
+```scheme
+
+; Original
+
+(define (ui/memory state)
+  (hash-join! state
+    (list 'ui 'memory)
+    (hash 'widget
+      (if (and
+           (hash-get! state (list 'register-state "rip") #:default #false)
+           (hash-get! state (list 'target 'pid) #:default #false))
+        (-> (dibbuk/read-mem
+             (hash-get! state (list 'target 'pid))
+             (hash-get! state (list 'register-state "rip"))
+             16)
+          (transduce (mapping (lambda (byte) (int->hex byte))) (into-list))
+          (to-string)
+          (list)
+          (rato/list))
+        (rato/list (list "nothing..."))))))
+
+; Macro
+
+(idk-fn state ((pid ('target 'pid))
+               (rip ('register-state "rip")))
+      (-> (dibbuk/read-mem pid rip 16)
+          (transduce (mapping (lambda (byte) (int->hex byte))) (into-list))
+          (to-string)
+          (list)
+          (rato/list))
+      (else (rato/list (list "nothing..."))))
+```
+
+
+

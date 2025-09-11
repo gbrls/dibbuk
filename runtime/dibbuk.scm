@@ -103,6 +103,7 @@
                         (ui/push-command "echo"
                           (lambda (state str) (ui/push-history state (string-join str " "))))
 
+                        ; TODO: after hot reloading this command breaks
                         (ui/push-command "vmmap"
                           (lambda (state str)
                             (ui/push-history state (to-string
@@ -210,7 +211,9 @@
            (exec-result
              (cond
                (eval-user-input (eval-user-command state current-command-string))
-               ((and (string=? current-command-string "") (string=? key "Return")) (dibbuk/reload))
+               ; TODO: handle repeat
+               ; ((and (string=? current-command-string "") (string=? key "Return")) (dibbuk/reload))
+               ((and (string=? current-command-string "") (string=? key "r") (= modifiers 2)) (dibbuk/reload))
                ((string=? key "Tab") (list (handle-tab state) (dibbuk/none)))
                ((and (string=? key "u") (= modifiers 2)) (list (handle-ctrl-up state) (dibbuk/none)))
                ((and (string=? key "d") (= modifiers 2)) (list (handle-ctrl-down state) (dibbuk/none)))
@@ -319,7 +322,7 @@
                                              ; (>= (+ diff 32) 0)
                                              (>= diff 0)
                                              ;
-                                             (< diff 64))))
+                                             (< diff 256))))
                            (into-list))
                          (list->sort)
                          (transduce (mapping (lambda (off) (string-append

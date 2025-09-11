@@ -10,7 +10,13 @@ S    S  S S    P S    P  S     S  S     b
 P ss"   P P `SS  P `SS    "sss"   P     P 
                                           
 
-- default layouts
-- modal input 
-- vim keybindings
-- press ? for help
+- Features in development:
+  - Replicate all UI functionality from the older rust-only version.
+  - Add conveninent way to extend gdb commands with builtin stuff from scheme.
+  - Implement proper displaying of strings with \t and \n's coming from gdb.
+  - Add conveninent way to add callback functions to (before or after) especific events so that users can extend the funcionality easily from the repl or scripitng.
+  - There's some busy waiting going on, I need to figure out where...
+  - Highlight changed registers.
+  - Add colours, titles, and overlapping borders.
+  - Tachyonfx animations.
+  - Replicate most of the core ui functionality from pwndbg.
