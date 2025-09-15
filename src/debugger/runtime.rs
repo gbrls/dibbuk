@@ -13,7 +13,7 @@ use steel_derive::Steel;
 use crate::{
     capstone_disassembly,
     elf::Elf,
-    il::MemMap,
+    il::{self, MemMap},
     rato::{self, LayoutNode, RatoUI},
 };
 
@@ -275,6 +275,8 @@ impl Builder {
         vm.register_fn("rust.elf->symbols", elf_symbols);
         vm.register_fn("rust.symbols-build", SymbolsLookup::new);
         vm.register_fn("rust.symbols-search", SymbolsLookup::search_symbol);
+        vm.register_fn("rust.disasm->mnemonic", |d: il::Disassembly| d.mnemonic);
+        vm.register_fn("rust.disasm->operand", |d: il::Disassembly| d.operand);
 
         // vm.register_fn("Paragrah", Paragraph::new);
 

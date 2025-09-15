@@ -66,7 +66,9 @@
     (list)))
 
 (define (addr->map state addr)
-  (first (addrmaps-filter-map state addr (lambda (x) x))))
+  (if (addr? state addr)
+    (first (addrmaps-filter-map state addr (lambda (x) x)))
+    #false))
 
 (define (addr? state addr)
   (not (empty? (addrmaps-filter-map state addr (lambda (x) x)))))
@@ -85,13 +87,15 @@
     (else state)))
 
 (define (addr->string state addr)
-  (with-state state ((symbols-cache ('elf-symbols)))
-    (letrec ((map (addr->map state addr))
-             (symbols (hash-ref symbols-cache (dibbuk/addrmap-file map)))
-             (label-offset (dibbuk/symbols-search symbols (+ (- addr (dibbuk/addrmap-start map)) (dibbuk/addrmap-offset map)))))
+  (if (addr? state addr)
+    (with-state state ((symbols-cache ('elf-symbols)))
+      (letrec ((map (addr->map state addr))
+               (symbols (hash-ref symbols-cache (dibbuk/addrmap-file map)))
+               (label-offset (dibbuk/symbols-search symbols (+ (- addr (dibbuk/addrmap-start map)) (dibbuk/addrmap-offset map)))))
 
-      (string-append (first label-offset) "+" (int->hex (second label-offset))))
-    (else (int->hex addr))))
+        (string-append (first label-offset) "+" (int->hex (second label-offset))))
+      (else (int->hex addr)))
+    (int->hex addr)))
 
 ; (define (memo/elf-symbols state path)
 ;   ; TODO
@@ -171,7 +175,9 @@
 
     ; just send to gdb instead
     (#true (list
-            (ui/push-history state (string-append "user> " str))
+            (->
+              (ui/push-history state (string-append "user> " str))
+              (hash-join! (list 'ui) (hash 'last-command str)))
             (dibbuk/cmd (list str))))))
 
 (define (state-update state key value)
@@ -227,7 +233,7 @@
              (cond
                (eval-user-input (eval-user-command state current-command-string))
                ; TODO: handle repeat
-               ; ((and (string=? current-command-string "") (string=? key "Return")) (dibbuk/reload))
+               ((and (string=? current-command-string "") (string=? key "Return") (hash-get! state (list 'ui 'last-command))) (dibbuk/cmd (list (hash-get! state (list 'ui 'last-command)))))
                ((and (string=? current-command-string "") (string=? key "r") (= modifiers 2)) (dibbuk/reload))
                ((string=? key "Tab") (list (ui/handle-tab state) (dibbuk/none)))
                ((and (string=? key "u") (= modifiers 2)) (list (ui/handle-ctrl-up state) (dibbuk/none)))
@@ -321,6 +327,21 @@
       (first))
     (else (hash))))
 
+(define (disasm->string d state)
+  (string-append
+    (disasm->mnemonic d)
+    " "
+    (if (starts-with? (disasm->operand d) "0x")
+      (addr->string state (->
+                           (disasm->operand d)
+                           (trim-start-matches "0x")
+                           (radix-string->int 16)))
+      (disasm->operand d))
+
+    ; (trim-start-matches "0x")
+    ; (radix-string->int 16)))))
+    ))
+
 (define (ui/disasm state)
   (with-state state ((rip ('register-state "rip")))
     (letrec ((disasm (disasm-ip-segment state)))
@@ -340,15 +361,18 @@
                                              (< diff 256))))
                            (into-list))
                          (list->sort)
-                         (transduce (mapping (lambda (off) (string-append
-                                                            ; "rip "
-                                                            (if (addr? state (+ rip off))
-                                                              (addr->string state (+ rip off))
+                         (transduce (mapping (lambda (off)
+                                              (letrec ((addr (+ rip off))
+                                                       (disasm (hash-ref disasm addr)))
+                                                (string-append
+                                                  ; "rip "
+                                                  (if (addr? state addr)
+                                                    (addr->string state addr)
 
-                                                              (int->hex (+ rip off) #:leading 16))
+                                                    (int->hex addr #:leading 16))
 
-                                                            "| "
-                                                            (to-string (hash-ref disasm (+ off rip))))))
+                                                  "| "
+                                                  (disasm->string disasm state)))))
                            (into-list)))
                        ;
                        ))))

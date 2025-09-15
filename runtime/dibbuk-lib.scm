@@ -68,6 +68,12 @@
 (define (dibbuk/symbols-search syms addr)
   (rust.symbols-search syms addr))
 
+(define (disasm->mnemonic d)
+  (rust.disasm->mnemonic d))
+
+(define (disasm->operand d)
+  (rust.disasm->operand d))
+
 (provide dibbuk/disasm-map)
 (provide dibbuk/disasm-at)
 (provide dibbuk/addrmap-contains?)
@@ -91,3 +97,5 @@
 (provide int->hex)
 (provide dibbuk/symbols-build)
 (provide dibbuk/symbols-search)
+(provide disasm->mnemonic)
+(provide disasm->operand)
