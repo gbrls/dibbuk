@@ -53,6 +53,12 @@ impl steel::rvals::Custom for Disassembly {
     }
 }
 
+impl Into<SteelVal> for Disassembly {
+    fn into(self) -> SteelVal {
+        SteelVal::StringV(self::to_string(&self).into())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MemMap {
     pub map_range: proc_maps::MapRange,

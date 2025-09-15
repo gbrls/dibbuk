@@ -1,5 +1,6 @@
 use elf;
 use elf::endian;
+use elf::relocation::Rela;
 use std::collections::HashMap;
 use std::path::Path;
 use std::rc::Rc;
@@ -30,7 +31,7 @@ impl Elf {
         let data_ref = unsafe { std::mem::transmute::<&[u8], &'static [u8]>(&data) };
 
         let inner = elf::ElfBytes::<elf::endian::AnyEndian>::minimal_parse(data_ref).unwrap();
-        let symbols = Elf::populate_symbols_alt(&inner);
+        let symbols = Elf::read_symbols(&inner);
 
         Ok(Self {
             inner,
@@ -39,47 +40,47 @@ impl Elf {
         })
     }
 
-    fn populate_symbols_alt(elf: &elf::ElfBytes<endian::AnyEndian>) -> HashMap<u64, String> {
-        if !(elf.symbol_table().is_ok() && elf.symbol_table().unwrap().is_some()) {
-            return HashMap::new();
+    fn read_symbols(elf: &elf::ElfBytes<endian::AnyEndian>) -> HashMap<u64, String> {
+        let mut sym_map = HashMap::new();
+
+        // Normal symbols
+        if let Ok(Some((symt, strt))) = elf.symbol_table() {
+            for sym in symt.iter() {
+                if sym.st_name > 0 {
+                    if let Ok(name) = strt.get(sym.st_name as usize) {
+                        sym_map.insert(sym.st_value, name.to_string());
+                    }
+                }
+            }
         }
 
-        // FIXME: we need to parse plt entries to get call symbols to there
-        let plt = elf.section_header_by_name(".plt").unwrap();
+        // Synthetic @plt symbols
+        if let Ok(Some(plt)) = elf.section_header_by_name(".plt") {
+            let plt_addr = plt.sh_addr;
+            let plt_entsize = plt.sh_entsize.max(16); // usually 16 on x86_64
 
-        let sym = elf.symbol_table().unwrap();
-        let (symt, strt) = sym.unwrap();
-        let sym_map: HashMap<_, _> = symt
-            .iter()
-            .filter_map(|symbol| {
-                if symbol.st_name > 0 {
-                    strt.get(symbol.st_name as usize)
-                        .ok()
-                        .and_then(|name| Some((symbol.st_value, name.to_string())))
-                    // WARN: this st_value might not be the correct way to get the addr
-                } else {
-                    None
+            if let Ok(Some(rela_plt)) = elf.section_header_by_name(".rela.plt") {
+                if let Ok(Some((dynsyms, dynstrs))) = elf.dynamic_symbol_table() {
+                    if let Ok(rela_iter) = elf.section_data_as_relas(&rela_plt) {
+                        for (i, rela) in rela_iter.enumerate() {
+                            let sym_idx = rela.r_sym;
+                            if let Ok(sym) = dynsyms.get(sym_idx as usize) {
+                                if sym.st_name > 0 {
+                                    if let Ok(name) = dynstrs.get(sym.st_name as usize) {
+                                        // Skip PLT[0], so offset by +1
+                                        let addr = plt_addr + (i as u64 + 1) * plt_entsize;
+                                        sym_map.insert(addr, format!("{}@plt", name));
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
-            })
-            .collect();
+            }
+        }
 
-        //let sym = elf.dynamic_symbol_table().unwrap();
-        //let (symt, strt) = sym.unwrap();
-        //let dysym_map = symt.iter().filter_map(|symbol| {
-        //    if symbol.st_name > 0 {
-        //        strt.get(symbol.st_name as usize).ok().and_then(|name| {
-        //            println!("{}", name);
-        //            Some((symbol.st_value, name.to_string()))
-        //        })
-        //    } else {
-        //        None
-        //    }
-        //});
-
-        //sym_map.extend(dysym_map);
         sym_map
     }
-
     //fn populate_symbols(elf: &goblin::elf::Elf) -> HashMap<u64, String> {
     //    let mut mp = HashMap::new();
 
@@ -151,7 +152,24 @@ mod test {
         let data_ref = unsafe { std::mem::transmute::<&[u8], &'static [u8]>(&data) };
 
         let elf_in = elf::ElfBytes::<elf::endian::AnyEndian>::minimal_parse(data_ref).unwrap();
-        let syms = Elf::populate_symbols_alt(&elf_in);
+        let syms = Elf::read_symbols(&elf_in);
+
+        syms.iter().for_each(|(addr, name)| {
+            println!("{:#018x} {}", addr, name);
+        });
+    }
+    #[test]
+    fn elf_frog_alt() {
+        let data = std::rc::Rc::from(
+            std::fs::read("./resources/frog")
+                .unwrap()
+                .into_boxed_slice(),
+        );
+
+        let data_ref = unsafe { std::mem::transmute::<&[u8], &'static [u8]>(&data) };
+
+        let elf_in = elf::ElfBytes::<elf::endian::AnyEndian>::minimal_parse(data_ref).unwrap();
+        let syms = Elf::read_symbols(&elf_in);
 
         syms.iter().for_each(|(addr, name)| {
             println!("{:#018x} {}", addr, name);

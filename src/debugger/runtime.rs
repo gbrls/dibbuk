@@ -1,13 +1,18 @@
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use color_eyre::owo_colors::OwoColorize;
 use ratatui::widgets::Paragraph;
 use read_process_memory::ProcessHandle;
-use steel::{SteelVal, rvals::Custom, steel_vm::register_fn::RegisterFn};
+use steel::{
+    SteelVal,
+    rvals::{Custom, SteelHashSet},
+    steel_vm::register_fn::RegisterFn,
+};
 use steel_derive::Steel;
 
 use crate::{
     capstone_disassembly,
+    elf::Elf,
     il::MemMap,
     rato::{self, LayoutNode, RatoUI},
 };
@@ -85,6 +90,9 @@ impl MapRange {
     pub fn flags(&self) -> String {
         self.flags.clone()
     }
+    pub fn offset(&self) -> usize {
+        self.offset
+    }
 
     pub fn size(&self) -> usize {
         self.range_end - self.range_start
@@ -92,8 +100,10 @@ impl MapRange {
     pub fn start(&self) -> usize {
         self.range_start
     }
-    pub fn filename(&self) -> Option<&std::path::Path> {
-        self.pathname.as_deref()
+    pub fn filename(&self) -> String {
+        self.pathname
+            .as_deref()
+            .map_or(String::new(), |p| p.as_os_str().to_str().unwrap().into())
     }
     pub fn is_exec(&self) -> bool {
         &self.flags[2..3] == "x"
@@ -125,6 +135,74 @@ pub fn process_memory_mapping(pid: u64) -> Vec<MapRange> {
             pathname: mp.filename().map(|p| p.to_owned()),
         })
         .collect()
+}
+
+#[derive(Clone, Debug)]
+struct SymbolsLookup {
+    sorted_arr: Vec<u64>,
+    map: HashMap<u64, String>,
+}
+
+impl Custom for SymbolsLookup {
+    fn fmt(&self) -> Option<std::result::Result<String, std::fmt::Error>> {
+        Some(Ok(format!("{:#?}", self.map)))
+    }
+}
+
+impl SymbolsLookup {
+    pub fn new(path: String) -> Self {
+        let elf = Elf::new(path.as_str());
+        if elf.is_ok() {
+            let elf = elf.unwrap();
+            let mut vec: Vec<_> = elf.symbols.clone().into_keys().collect();
+            vec.sort();
+
+            SymbolsLookup {
+                sorted_arr: vec,
+                map: elf.symbols,
+            }
+        } else {
+            SymbolsLookup {
+                sorted_arr: Vec::new(),
+                map: HashMap::new(),
+            }
+        }
+    }
+
+    pub fn search_symbol(&self, addr: u64) -> Option<(String, u64)> {
+        if self.sorted_arr.is_empty() {
+            return None;
+        }
+
+        let sym = self
+            .sorted_arr
+            .as_slice()
+            .partition_point(|label| addr >= *label);
+
+        if sym == self.sorted_arr.len() {
+            return None;
+        }
+
+        // We want to go back one element
+        let sym = if sym > 0 { sym - 1 } else { sym };
+
+        let sym = self.sorted_arr[sym];
+        let diff = addr - (sym as u64);
+        self.map
+            .get(&sym)
+            .and_then(|str| Some((str.to_owned(), diff)))
+    }
+}
+
+pub fn elf_symbols(path: String) -> HashMap<u64, String> {
+    if let Ok(elf) = Elf::new(path.as_str()) {
+        let mut vec: Vec<_> = elf.symbols.clone().into_keys().collect();
+        vec.sort();
+
+        elf.symbols
+    } else {
+        HashMap::new()
+    }
 }
 
 pub fn read_proc_mem(addr: usize, length: usize, pid: u64) -> Option<Vec<u8>> {
@@ -172,6 +250,7 @@ impl Builder {
 
         vm.register_type::<RuntimeRequest>("Request?");
         vm.register_type::<rato::TermEvent>("TermEvent?");
+        vm.register_type::<SymbolsLookup>("SymbolsLookup?");
         vm.register_fn("EmptyReq", || RuntimeRequest::Empty);
         vm.register_fn("Reload", || RuntimeRequest::Reload);
         vm.register_fn("GdbCommandsReq", RuntimeRequest::GdbCommand);
@@ -184,12 +263,18 @@ impl Builder {
         vm.register_fn("ProcessMemoryMapping", process_memory_mapping);
         vm.register_fn("MapRange->contains?", MapRange::contains);
         vm.register_fn("MapRange->flags", MapRange::flags);
+        vm.register_fn("MapRange->filename", MapRange::filename);
+        vm.register_fn("MapRange->start", MapRange::start);
+        vm.register_fn("MapRange->offset", MapRange::offset);
         vm.register_fn("rust.radix-string->int", str_to_int);
         vm.register_fn("rust.int->hex", int_to_hex);
         vm.register_fn("ReadProcMem", read_proc_mem);
         vm.register_fn("DisasmMapRange", capstone_disassembly::disasm_in_map);
         vm.register_fn("DisasmMapRangeOffset", capstone_disassembly::read_at);
         vm.register_fn("rust.list->sort", sort);
+        vm.register_fn("rust.elf->symbols", elf_symbols);
+        vm.register_fn("rust.symbols-build", SymbolsLookup::new);
+        vm.register_fn("rust.symbols-search", SymbolsLookup::search_symbol);
 
         // vm.register_fn("Paragrah", Paragraph::new);
 

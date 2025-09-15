@@ -10,11 +10,23 @@
 (define (dibbuk/addrmap-flags mp)
   (MapRange->flags mp))
 
+(define (dibbuk/addrmap-start mp)
+  (MapRange->start mp))
+
+(define (dibbuk/addrmap-offset mp)
+  (MapRange->offset mp))
+
+(define (dibbuk/addrmap-file mp)
+  (MapRange->filename mp))
+
 (define (dibbuk/proc-maps pid)
   (ProcessMemoryMapping pid))
 
 (define (dibbuk/read-mem pid addr len)
   (ReadProcMem addr len pid))
+
+(define (dibbuk/elf->symbols path)
+  (rust.elf->symbols path))
 
 (define (dibbuk/cmd l) (GdbCommandsReq l))
 (define (dibbuk/none) (EmptyReq))
@@ -38,13 +50,31 @@
     (#true
       (list state (dibbuk/none)))))
 
+(define (list->sort l)
+  (rust.list->sort l))
+
+(define (radix-string->int s base)
+  (rust.radix-string->int s base))
+
+(define (int->hex s #:leading [leading 2])
+  (rust.int->hex s leading))
+
 (define (dibbuk/hello)
   (set! *dibbuk-command* (dibbuk/cmd (list "a" "b"))))
+
+(define (dibbuk/symbols-build path)
+  (rust.symbols-build path))
+
+(define (dibbuk/symbols-search syms addr)
+  (rust.symbols-search syms addr))
 
 (provide dibbuk/disasm-map)
 (provide dibbuk/disasm-at)
 (provide dibbuk/addrmap-contains?)
 (provide dibbuk/addrmap-flags)
+(provide dibbuk/addrmap-file)
+(provide dibbuk/addrmap-start)
+(provide dibbuk/addrmap-offset)
 (provide dibbuk/proc-maps)
 (provide dibbuk/read-mem)
 (provide dibbuk/cmd)
@@ -55,3 +85,9 @@
 (provide dibbuk/next?)
 (provide dibbuk/make-next)
 (provide dibbuk/hello)
+(provide dibbuk/elf->symbols)
+(provide list->sort)
+(provide radix-string->int)
+(provide int->hex)
+(provide dibbuk/symbols-build)
+(provide dibbuk/symbols-search)

@@ -56,15 +56,6 @@
                (new-substate (hash-join! old-substate (cdr keys) value)))
         (hash-insert h k new-substate)))))
 
-(define (list->sort l)
-  (rust.list->sort l))
-
-(define (radix-string->int s base)
-  (rust.radix-string->int s base))
-
-(define (int->hex s #:leading [leading 2])
-  (rust.int->hex s leading))
-
 (define (addrmaps-filter-map state addr f)
   (if (hash-get! state (list 'target 'maps) #:default #false)
     (transduce
@@ -74,6 +65,9 @@
       (into-list))
     (list)))
 
+(define (addr->map state addr)
+  (first (addrmaps-filter-map state addr (lambda (x) x))))
+
 (define (addr? state addr)
   (not (empty? (addrmaps-filter-map state addr (lambda (x) x)))))
 
@@ -82,6 +76,27 @@
     (if (not (empty? res))
       (first res)
       "")))
+
+(define (build-symbols-cache state)
+  (with-state state ((maps ('target 'maps)))
+    (let ((cache
+            (transduce maps (mapping (lambda (m) (list (dibbuk/addrmap-file m) (dibbuk/symbols-build (dibbuk/addrmap-file m))))) (into-hashmap))))
+      (hash-join! state (list 'elf-symbols) cache))
+    (else state)))
+
+(define (addr->string state addr)
+  (with-state state ((symbols-cache ('elf-symbols)))
+    (letrec ((map (addr->map state addr))
+             (symbols (hash-ref symbols-cache (dibbuk/addrmap-file map)))
+             (label-offset (dibbuk/symbols-search symbols (+ (- addr (dibbuk/addrmap-start map)) (dibbuk/addrmap-offset map)))))
+
+      (string-append (first label-offset) "+" (int->hex (second label-offset))))
+    (else (int->hex addr))))
+
+; (define (memo/elf-symbols state path)
+;   ; TODO
+;   (dibbuk/elf->symbols state)
+;   state)
 
 (define (ui/push-history state str)
   (letrec ((history (hash-get! state (list 'ui 'command-history) #:default (list))))
@@ -140,8 +155,8 @@
               (ui/push-history (string-append "user> " str))
               (ui/push-history (string-append
                                 "=> "
-                                (if (> (string-length (to-string expr-result)) (* 1024 1))
-                                  (string-append (substring (to-string expr-result) 0 (* 1024 1)) "\n... (too big)")
+                                (if (> (string-length (to-string expr-result)) (* 256 1))
+                                  (string-append (substring (to-string expr-result) 0 (* 256 1)) "...")
                                   (to-string expr-result)))))
             (dibbuk/none)))))
 
@@ -166,7 +181,7 @@
            (new-substate (hash-union value old-substate)))
     (hash-insert state key new-substate)))
 
-(define (handle-tab state)
+(define (ui/handle-tab state)
   (letrec ((current
              (hash-get! state (list 'ui 'current-widget) #:default 'history))
            (next
@@ -175,18 +190,18 @@
                ((symbol=? current 'registers) 'history))))
     (hash-join! state (list 'ui) (hash 'current-widget next))))
 
-(define (handle-ctrl-up state)
+(define (ui/handle-ctrl-up state)
   (let ((cur (hash-get! state (list 'ui 'history 'focus) #:default 0)))
 
     (hash-join! state (list 'ui 'history) (hash 'focus (max 8 (- cur 8))))))
 
-(define (handle-ctrl-down state)
+(define (ui/handle-ctrl-down state)
   (let ((cur (hash-get! state (list 'ui 'history 'focus) #:default 0))
         (max-len (length (hash-get! state (list 'ui 'command-history) #:default (list)))))
 
     (hash-join! state (list 'ui 'history) (hash 'focus (min max-len (+ cur 8))))))
 
-(define (handle-user-key k state #:control [control? #false])
+(define (ui/handle-user-key k state #:control [control? #false])
   ; (displayln k)
   (letrec ((has-ui (hash-contains? state 'ui))
            (has-buf (and
@@ -214,9 +229,9 @@
                ; TODO: handle repeat
                ; ((and (string=? current-command-string "") (string=? key "Return")) (dibbuk/reload))
                ((and (string=? current-command-string "") (string=? key "r") (= modifiers 2)) (dibbuk/reload))
-               ((string=? key "Tab") (list (handle-tab state) (dibbuk/none)))
-               ((and (string=? key "u") (= modifiers 2)) (list (handle-ctrl-up state) (dibbuk/none)))
-               ((and (string=? key "d") (= modifiers 2)) (list (handle-ctrl-down state) (dibbuk/none)))
+               ((string=? key "Tab") (list (ui/handle-tab state) (dibbuk/none)))
+               ((and (string=? key "u") (= modifiers 2)) (list (ui/handle-ctrl-up state) (dibbuk/none)))
+               ((and (string=? key "d") (= modifiers 2)) (list (ui/handle-ctrl-down state) (dibbuk/none)))
                (#true (dibbuk/none))))
 
            (next-ui (hash-join!
@@ -327,7 +342,11 @@
                          (list->sort)
                          (transduce (mapping (lambda (off) (string-append
                                                             ; "rip "
-                                                            (int->hex (+ rip off) #:leading 16)
+                                                            (if (addr? state (+ rip off))
+                                                              (addr->string state (+ rip off))
+
+                                                              (int->hex (+ rip off) #:leading 16))
+
                                                             "| "
                                                             (to-string (hash-ref disasm (+ off rip))))))
                            (into-list)))
@@ -384,10 +403,12 @@
            updated-state
            'rato-ui
            (rato/ui (list
-                     (hash-get! updated-state (list 'ui 'history 'widget) #:default (rato/paragraph "...ops"))
-                     (hash-get! updated-state (list 'ui 'registers 'widget) #:default (rato/paragraph "...ops"))
                      (hash-get! updated-state (list 'ui 'disasm 'widget) #:default (rato/paragraph "...ops"))
-                     (hash-get! updated-state (list 'ui 'memory 'widget) #:default (rato/paragraph "...ops")))
+                     (hash-get! updated-state (list 'ui 'registers 'widget) #:default (rato/paragraph "...ops"))
+                     (hash-get! updated-state (list 'ui 'memory 'widget) #:default (rato/paragraph "...ops"))
+                     (hash-get! updated-state (list 'ui 'history 'widget) #:default (rato/paragraph "...ops"))
+                     ;
+                     )
              (rato/layout
                (list
                  (rato/layout-single)
@@ -427,10 +448,10 @@
               (eval-user-command state s))
 
             ((Key k)
-              (handle-user-key k state))
+              (ui/handle-user-key k state))
 
             ((ControlKey k)
-              (handle-user-key k state #:control #true))
+              (ui/handle-user-key k state #:control #true))
 
             ((NotifyAsync e)
               (if (string=? "thread-group-started" (hash-ref e 'class))
@@ -451,7 +472,9 @@
                                           "> PID "
                                           (to-string (hash-get! state (list 'target 'pid)))
                                           " stopped."))
-                        (hash-join! (list 'target) (hash 'maps (dibbuk/proc-maps (hash-get! state (list 'target 'pid))))))
+                        ; (hash-join! (list 'target) (hash 'maps (dibbuk/proc-maps (hash-get! state (list 'target 'pid)))))
+                        ;
+                        )
                       state)
                     (dibbuk/cmd (list "-data-list-changed-registers"))))
                 (dibbuk/none)))
@@ -548,7 +571,8 @@
                              state
                              (ui/push-history (string-append "THREADS> " (to-string id)))
                              (hash-join! (list 'target) (hash 'meta meta 'name name 'pid pid))
-                             (hash-join! (list 'target) (hash 'maps (dibbuk/proc-maps pid))))
+                             (hash-join! (list 'target) (hash 'maps (dibbuk/proc-maps pid)))
+                             (build-symbols-cache))
                         (dibbuk/none))))
 
                   (else result))))

@@ -95,6 +95,7 @@ pub enum Widget {
     Paragraph(Paragraph),
     Block(Block),
     List(Vec<String>, usize, bool),
+    Table(Vec<Vec<String>>),
     Empty,
 }
 
@@ -146,6 +147,7 @@ impl Widget {
             Widget::Block(_) => false,
             Widget::List(_, _, _) => true,
             Widget::Empty => false,
+            Widget::Table(items) => todo!(),
         }
     }
 }
@@ -196,6 +198,7 @@ impl ratatui::prelude::Widget for &Widget {
                 ratatui::widgets::Widget::render(p, area, buf);
                 //
             }
+            Widget::Table(items) => todo!(),
         }
     }
 }
